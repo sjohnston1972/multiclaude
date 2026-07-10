@@ -1,5 +1,5 @@
 import pty from "node-pty";
-import { execFile, execSync } from "node:child_process";
+import { execFile, execFileSync, execSync } from "node:child_process";
 import crypto from "node:crypto";
 import os from "node:os";
 import path from "node:path";
@@ -49,6 +49,31 @@ export interface CreateOptions {
   cwd?: string;
   /** Typed into the shell shortly after it starts (e.g. "claude"). */
   initialCommand?: string;
+}
+
+/**
+ * Kill a session's process tree via taskkill instead of pty.kill():
+ * node-pty's native kill path can hard-crash the whole server on Windows
+ * (ConPTY race, intermittent). taskkill terminates the tree from outside;
+ * node-pty then just sees a normal process exit and cleans up safely.
+ */
+function killTree(pid: number): void {
+  execFile("taskkill", ["/pid", String(pid), "/T", "/F"], { windowsHide: true }, () => {
+    // exit code 128 = process already gone — fine either way
+  });
+}
+
+/** Synchronous variant for server shutdown, where async callbacks never run. */
+function killTreeSync(pid: number): void {
+  try {
+    execFileSync("taskkill", ["/pid", String(pid), "/T", "/F"], {
+      windowsHide: true,
+      stdio: "ignore",
+      timeout: 3000,
+    });
+  } catch {
+    // already gone
+  }
 }
 
 /** Detect the best available shell once at startup: PowerShell 7 if installed, else Windows PowerShell. */
@@ -220,25 +245,17 @@ export class SessionManager {
         // already gone
       }
       const hardKill = setTimeout(() => {
-        try {
-          if (!s.exited) s.pty.kill();
-        } catch {
-          // already gone
-        }
+        if (!s.exited) killTree(s.pty.pid);
       }, KILL_GRACE_MS);
       // Never leave the HTTP request hanging even if the exit event is lost.
       const bail = setTimeout(finish, 3000);
     });
   }
 
-  /** Kill every session — used on server shutdown. */
+  /** Kill every session — used on server shutdown (sync: exit follows immediately). */
   killAll(): void {
     for (const s of this.sessions.values()) {
-      try {
-        s.pty.kill();
-      } catch {
-        // process may already be gone
-      }
+      if (!s.exited) killTreeSync(s.pty.pid);
     }
     this.sessions.clear();
   }

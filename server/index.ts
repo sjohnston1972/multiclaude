@@ -125,6 +125,13 @@ app.post("/api/sessions/:id/ensure", async (req, reply) => {
   }
 });
 
+// Kill everything at once (all kills run in parallel, responds when done).
+app.delete("/api/sessions", async () => {
+  const ids = sessions.list().map((s) => s.id);
+  await Promise.all(ids.map((id) => sessions.kill(id)));
+  return { ok: true, killed: ids.length };
+});
+
 app.delete("/api/sessions/:id", async (req, reply) => {
   const { id } = req.params as { id: string };
   // Resolves once the process has actually exited, so the client's next

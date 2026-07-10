@@ -323,6 +323,18 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKey, true);
   }, [cycleTab]);
 
+  const killAllFromList = useCallback(async () => {
+    try {
+      await api("/api/sessions", { method: "DELETE" });
+      if (model) {
+        collectTerminalTabs().forEach((t) => model.doAction(Actions.deleteTab(t.getId())));
+        persistLayout(model);
+      }
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }, [model, collectTerminalTabs, persistLayout]);
+
   // ---------------------------------------------------------------- factory
   const factory = useCallback(
     (node: TabNode) => {
@@ -428,6 +440,7 @@ export default function App() {
           openSessionIds={openSessionIds}
           onReattach={reattach}
           onKill={killFromList}
+          onKillAll={killAllFromList}
           onClose={() => setShowSessions(false)}
         />
       )}

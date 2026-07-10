@@ -10,15 +10,18 @@ export default function SessionListModal({
   openSessionIds,
   onReattach,
   onKill,
+  onKillAll,
   onClose,
 }: {
   openSessionIds: Set<string>;
   onReattach: (s: SessionInfo) => void;
   onKill: (s: SessionInfo) => Promise<void>;
+  onKillAll: () => Promise<void>;
   onClose: () => void;
 }) {
   const [sessions, setSessions] = useState<SessionInfo[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [confirmAll, setConfirmAll] = useState(false);
 
   const refresh = () => {
     api<SessionInfo[]>("/api/sessions")
@@ -40,6 +43,31 @@ export default function SessionListModal({
       ) : sessions.length === 0 ? (
         <p className="text-neutral-400">No sessions running.</p>
       ) : (
+        <>
+        <div className="mb-2 flex items-center justify-end gap-2">
+          {confirmAll ? (
+            <>
+              <span className="text-sm text-neutral-400">
+                Kill all {sessions.length} session{sessions.length === 1 ? "" : "s"}?
+              </span>
+              <Button
+                kind="danger"
+                onClick={() => {
+                  setConfirmAll(false);
+                  setSessions([]); // optimistic — the server confirms in ~1s
+                  void onKillAll().then(refresh);
+                }}
+              >
+                Yes, kill all
+              </Button>
+              <Button onClick={() => setConfirmAll(false)}>Cancel</Button>
+            </>
+          ) : (
+            <Button kind="danger" onClick={() => setConfirmAll(true)}>
+              Kill all
+            </Button>
+          )}
+        </div>
         <table className="w-full text-left">
           <thead>
             <tr className="text-xs uppercase text-neutral-500">
@@ -86,6 +114,7 @@ export default function SessionListModal({
             ))}
           </tbody>
         </table>
+        </>
       )}
     </Modal>
   );
