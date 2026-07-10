@@ -55,6 +55,9 @@ export default function NewSessionDialog({
   const [newFolderGit, setNewFolderGit] = useState(true);
   const [newFolderPublish, setNewFolderPublish] = useState(false);
   const [newFolderVisibility, setNewFolderVisibility] = useState<"private" | "public" | null>(null);
+  const [addFile, setAddFile] = useState(false);
+  const [fileName, setFileName] = useState("CLAUDE.md");
+  const [fileContent, setFileContent] = useState("");
   const [showCreateRepo, setShowCreateRepo] = useState(false);
   const [repoName, setRepoName] = useState("");
   const [repoVisibility, setRepoVisibility] = useState<"private" | "public" | null>(null);
@@ -105,11 +108,16 @@ export default function NewSessionDialog({
     setBusy("Creating folder…");
     setError(null);
     try {
-      const r = await api<{ path: string; gitWarning?: string }>("/api/mkdir", {
+      const r = await api<{ path: string; gitWarning?: string; fileWarning?: string }>("/api/mkdir", {
         method: "POST",
-        body: { parent: browse.path, name: newFolderName.trim(), git: newFolderGit },
+        body: {
+          parent: browse.path,
+          name: newFolderName.trim(),
+          git: newFolderGit,
+          file: addFile && fileName.trim() ? { name: fileName.trim(), content: fileContent } : undefined,
+        },
       });
-      if (r.gitWarning) setError(r.gitWarning); // non-fatal — folder still opens
+      if (r.gitWarning || r.fileWarning) setError(r.gitWarning ?? r.fileWarning ?? null); // non-fatal
       if (wantPublish) {
         setBusy(`Publishing ${newFolderName.trim()} to GitHub…`);
         await api("/api/github/publish", {
@@ -285,7 +293,10 @@ export default function NewSessionDialog({
                     </Button>
                     <Button onClick={() => setShowNewFolder(false)}>Cancel</Button>
                   </div>
-                  <label className="flex items-center gap-2 text-sm">
+                  <label
+                    className="flex items-center gap-2 text-sm"
+                    title="Runs `git init -b main` in the new folder so it's version-controlled from the start. The session's tab title will show the branch (main) immediately, and the Sessions list marks it with a git badge."
+                  >
                     <input
                       type="checkbox"
                       checked={newFolderGit}
@@ -293,7 +304,10 @@ export default function NewSessionDialog({
                     />
                     Make it a git repo
                   </label>
-                  <label className={`flex items-center gap-2 text-sm ${!newFolderGit ? "opacity-40" : ""}`}>
+                  <label
+                    className={`flex items-center gap-2 text-sm ${!newFolderGit ? "opacity-40" : ""}`}
+                    title="After creating the repo, makes an initial commit and creates a matching repo on your GitHub account, then pushes. You choose private or public. Requires the GitHub CLI (gh) installed and signed in, plus a git name/email configured for the commit."
+                  >
                     <input
                       type="checkbox"
                       checked={newFolderPublish}
@@ -324,6 +338,58 @@ export default function NewSessionDialog({
                       </span>
                     )}
                   </label>
+                  <label
+                    className="flex items-center gap-2 text-sm"
+                    title="Writes one file into the new folder before it's committed — e.g. a CLAUDE.md with project instructions Claude Code reads automatically, or a README. Pick a name and type the contents below; blank contents makes an empty file."
+                  >
+                    <input
+                      type="checkbox"
+                      checked={addFile}
+                      onChange={(e) => setAddFile(e.target.checked)}
+                    />
+                    Add a starter file
+                  </label>
+                  {addFile && (
+                    <div className="flex flex-col gap-1.5 rounded border border-neutral-700 bg-neutral-900/60 p-2">
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          value={fileName}
+                          onChange={(e) => setFileName(e.target.value)}
+                          placeholder="File name (e.g. CLAUDE.md)"
+                          spellCheck={false}
+                          className="w-56 rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-sm outline-none focus:border-blue-600"
+                        />
+                        <span className="flex gap-1">
+                          {["CLAUDE.md", "README.md", "notes.txt"].map((n) => (
+                            <button
+                              key={n}
+                              onClick={() => setFileName(n)}
+                              className={`rounded border px-1.5 py-0.5 text-xs ${
+                                fileName === n
+                                  ? "border-blue-600 bg-neutral-700 text-white"
+                                  : "border-neutral-700 bg-neutral-800 text-neutral-300 hover:bg-neutral-700"
+                              }`}
+                            >
+                              {n}
+                            </button>
+                          ))}
+                        </span>
+                      </div>
+                      <textarea
+                        value={fileContent}
+                        onChange={(e) => setFileContent(e.target.value)}
+                        placeholder={
+                          fileName.trim().toLowerCase() === "claude.md"
+                            ? "Project instructions for Claude Code — what this project is, how to run it, conventions…"
+                            : "File contents (leave blank for an empty file)"
+                        }
+                        spellCheck={false}
+                        rows={6}
+                        className="w-full resize-y rounded border border-neutral-700 bg-neutral-800 px-2 py-1 font-mono text-xs text-neutral-100 outline-none focus:border-blue-600"
+                      />
+                    </div>
+                  )}
                 </div>
               ) : (
                 <button
@@ -469,7 +535,10 @@ export default function NewSessionDialog({
       )}
 
       <div className="mt-4 flex flex-col gap-2 border-t border-neutral-700 pt-3">
-        <label className="flex items-center gap-2">
+        <label
+          className="flex items-center gap-2"
+          title="Types `claude` into the new terminal automatically once the shell is ready. Turn this off to get a plain PowerShell prompt where you can run anything (git, npm, or launch claude yourself)."
+        >
           <input
             type="checkbox"
             checked={autoClaude}
@@ -480,7 +549,10 @@ export default function NewSessionDialog({
             session
           </span>
         </label>
-        <label className={`flex items-center gap-2 ${!autoClaude ? "opacity-40" : ""}`}>
+        <label
+          className={`flex items-center gap-2 ${!autoClaude ? "opacity-40" : ""}`}
+          title="Starts Claude with --dangerously-skip-permissions, so it won't stop to ask before running tools or editing files. Faster and hands-off, but Claude can act without confirmation — only use it in folders you trust."
+        >
           <input
             type="checkbox"
             checked={skipPermissions}
@@ -494,7 +566,10 @@ export default function NewSessionDialog({
             </span>
           </span>
         </label>
-        <label className={`flex items-center gap-2 ${!autoClaude ? "opacity-40" : ""}`}>
+        <label
+          className={`flex items-center gap-2 ${!autoClaude ? "opacity-40" : ""}`}
+          title="Runs `claude --worktree <name>`, giving this session its own isolated git worktree. Lets you run several Claude sessions on the same repo at once without their edits colliding. Only meaningful in a git repo; the name is optional (auto-generated if blank)."
+        >
           <input
             type="checkbox"
             checked={useWorktree}

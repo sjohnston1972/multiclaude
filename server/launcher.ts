@@ -91,7 +91,12 @@ export function registerLauncherRoutes(app: FastifyInstance): void {
 
   // ------------------------------------------------------- create a subfolder
   app.post("/api/mkdir", async (req, reply) => {
-    const body = (req.body ?? {}) as { parent?: string; name?: string; git?: boolean };
+    const body = (req.body ?? {}) as {
+      parent?: string;
+      name?: string;
+      git?: boolean;
+      file?: { name?: string; content?: string };
+    };
     const parent = body.parent ? validateDirPath(body.parent) : null;
     if (!parent) {
       reply.code(400);
@@ -103,6 +108,21 @@ export function registerLauncherRoutes(app: FastifyInstance): void {
       reply.code(400);
       return { error: "Folder name may only use letters, numbers, spaces, dots, dashes" };
     }
+
+    // Optional starter file — validate its name before creating anything.
+    let fileName: string | null = null;
+    if (body.file) {
+      fileName = (body.file.name ?? "").trim();
+      if (!/^[A-Za-z0-9 ._-]{1,120}$/.test(fileName) || fileName === "." || fileName === "..") {
+        reply.code(400);
+        return { error: "File name may only use letters, numbers, spaces, dots, dashes" };
+      }
+      if ((body.file.content ?? "").length > 1_000_000) {
+        reply.code(400);
+        return { error: "Starter file is too large (max ~1 MB)" };
+      }
+    }
+
     const target = path.join(parent, name);
     if (fs.existsSync(target)) {
       reply.code(409);
@@ -113,6 +133,17 @@ export function registerLauncherRoutes(app: FastifyInstance): void {
     } catch (err) {
       reply.code(500);
       return { error: `Couldn't create the folder: ${(err as Error).message}` };
+    }
+
+    // Write the starter file (before git init, so a later publish commits it).
+    let file: string | undefined;
+    if (fileName) {
+      try {
+        fs.writeFileSync(path.join(target, fileName), body.file?.content ?? "");
+        file = fileName;
+      } catch (err) {
+        return { path: target, git: false, fileWarning: `Folder created, but the file couldn't be written: ${(err as Error).message}` };
+      }
     }
 
     let git = false;
@@ -134,7 +165,7 @@ export function registerLauncherRoutes(app: FastifyInstance): void {
             : `Folder created, but 'git init' failed: ${(e.message ?? "").trim()}`;
       }
     }
-    return { path: target, git, gitWarning };
+    return { path: target, git, file, gitWarning };
   });
 
   // ------------------------------ publish an existing local folder to GitHub

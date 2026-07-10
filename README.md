@@ -64,8 +64,10 @@ run the production version yourself: `npm run build` then `npm start`
   `~\multiclaude-workspaces\`), or as a blank shell. In the folder browser you
   can also type or paste a path directly and press Enter, or **create a new
   folder** on the spot and open a session in it — optionally making it a **git
-  repo** (on by default) and even **publishing it to GitHub** (creates the repo
-  with an initial commit and pushes). On the GitHub tab you can
+  repo** (on by default), dropping in a **starter file** (e.g. a `CLAUDE.md`
+  with project instructions, or any freeform file), and even **publishing it to
+  GitHub** (creates the repo with an initial commit and pushes). Every option
+  in the dialog has a detailed tooltip on hover. On the GitHub tab you can
   **create a brand-new repo** (pick private/public each time; it's initialised
   with a README, cloned into your workspace, and opened). Options: auto-start
   `claude` (on by default), skip its permission prompts

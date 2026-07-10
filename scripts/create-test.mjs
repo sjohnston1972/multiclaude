@@ -37,6 +37,20 @@ check("mkdir rejects UNC parent", bad3.status === 400);
 if (fs.existsSync(made)) fs.rmdirSync(made);
 check("mkdir cleanup", !fs.existsSync(made));
 
+// --- mkdir with a starter file
+const folderF = "mc-file-" + Math.floor(Date.now() / 1000);
+const madeF = path.join(parent, folderF);
+const fileBody = "# Seeded\nhello";
+const mkf = await (await post("/api/mkdir", { parent, name: folderF, file: { name: "CLAUDE.md", content: fileBody } })).json();
+check("mkdir writes starter file", mkf.file === "CLAUDE.md" && fs.existsSync(path.join(madeF, "CLAUDE.md")));
+check("starter file content matches", fs.existsSync(path.join(madeF, "CLAUDE.md")) && fs.readFileSync(path.join(madeF, "CLAUDE.md"), "utf8") === fileBody);
+// bad file name rejected (folder must not be created)
+const folderF2 = "mc-file2-" + Math.floor(Date.now() / 1000);
+const badFile = await post("/api/mkdir", { parent, name: folderF2, file: { name: "../evil", content: "x" } });
+check("starter file traversal name rejected", badFile.status === 400);
+check("folder not created when file name invalid", !fs.existsSync(path.join(parent, folderF2)));
+fs.rmSync(madeF, { recursive: true, force: true });
+
 // --- github/create validation (no real repo created)
 const noVis = await post("/api/github/create", { name: "some-repo" });
 check("create-repo requires visibility", noVis.status === 400, `status ${noVis.status}`);
