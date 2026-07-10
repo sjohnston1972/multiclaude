@@ -1,0 +1,266 @@
+import { useEffect, useState } from "react";
+import { api, SessionInfo } from "./api";
+import { Button, Modal } from "./components";
+
+interface BrowseResult {
+  path: string | null;
+  parent: string | null;
+  dirs: string[];
+  drives: string[];
+  recent: string[];
+}
+
+interface Repo {
+  name: string;
+  nameWithOwner: string;
+  updatedAt: string;
+  cloned: boolean;
+}
+
+type Mode = "folder" | "github" | "blank";
+
+/**
+ * The launcher: pick where a new terminal starts — a local folder (browsed
+ * server-side), a GitHub repo (cloned via gh into the workspace root), or a
+ * blank shell in the home directory.
+ */
+export default function NewSessionDialog({
+  onCreated,
+  onClose,
+}: {
+  onCreated: (s: SessionInfo) => void;
+  onClose: () => void;
+}) {
+  const [mode, setMode] = useState<Mode>("folder");
+  const [browse, setBrowse] = useState<BrowseResult | null>(null);
+  const [repos, setRepos] = useState<Repo[] | null>(null);
+  const [ghError, setGhError] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [autoClaude, setAutoClaude] = useState(true);
+  const [useWorktree, setUseWorktree] = useState(false);
+  const [worktreeName, setWorktreeName] = useState("");
+
+  const loadBrowse = (path?: string) => {
+    setError(null);
+    api<BrowseResult>(`/api/browse${path ? `?path=${encodeURIComponent(path)}` : ""}`)
+      .then(setBrowse)
+      .catch((e) => setError(e.message));
+  };
+
+  useEffect(() => loadBrowse(), []);
+
+  useEffect(() => {
+    if (mode === "github" && repos === null && !ghError) {
+      api<{ repos: Repo[] }>("/api/github/repos")
+        .then((r) => setRepos(r.repos))
+        .catch((e) => setGhError(e.message));
+    }
+  }, [mode, repos, ghError]);
+
+  const createSession = async (cwd?: string) => {
+    setBusy("Starting session…");
+    setError(null);
+    try {
+      const worktree = autoClaude && useWorktree
+        ? worktreeName.trim() || `mc-${Math.random().toString(36).slice(2, 6)}`
+        : null;
+      const s = await api<SessionInfo>("/api/sessions", {
+        method: "POST",
+        body: { cwd, autoClaude, worktree },
+      });
+      onCreated(s);
+      onClose();
+    } catch (e) {
+      setError((e as Error).message);
+      setBusy(null);
+    }
+  };
+
+  const cloneAndOpen = async (repo: Repo) => {
+    setBusy(repo.cloned ? "Opening existing clone…" : `Cloning ${repo.nameWithOwner}…`);
+    setError(null);
+    try {
+      const r = await api<{ path: string; existing: boolean }>("/api/github/clone", {
+        method: "POST",
+        body: { nameWithOwner: repo.nameWithOwner },
+      });
+      await createSession(r.path);
+    } catch (e) {
+      setError((e as Error).message);
+      setBusy(null);
+    }
+  };
+
+  const modeTab = (m: Mode, label: string) => (
+    <button
+      onClick={() => setMode(m)}
+      className={`rounded-t px-3 py-1.5 text-sm ${
+        mode === m
+          ? "bg-neutral-800 font-medium text-white"
+          : "text-neutral-400 hover:text-neutral-200"
+      }`}
+    >
+      {label}
+    </button>
+  );
+
+  return (
+    <Modal title="New session" onClose={onClose} wide>
+      <div className="mb-3 flex gap-1 border-b border-neutral-700">
+        {modeTab("folder", "Local folder")}
+        {modeTab("github", "GitHub repo")}
+        {modeTab("blank", "Blank shell")}
+      </div>
+
+      {error && <p className="mb-2 rounded bg-red-950 px-3 py-1.5 text-red-300">{error}</p>}
+      {busy && <p className="mb-2 rounded bg-blue-950 px-3 py-1.5 text-blue-300">{busy}</p>}
+
+      {mode === "folder" && browse && (
+        <div>
+          {browse.path === null ? (
+            <>
+              {browse.recent.length > 0 && (
+                <>
+                  <p className="mb-1 text-xs uppercase text-neutral-500">Recent folders</p>
+                  <div className="mb-3 flex flex-col gap-1">
+                    {browse.recent.map((f) => (
+                      <button
+                        key={f}
+                        onClick={() => void createSession(f)}
+                        className="truncate rounded bg-neutral-800 px-3 py-1.5 text-left hover:bg-neutral-700"
+                        title={`Open a session in ${f}`}
+                      >
+                        {f}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+              <p className="mb-1 text-xs uppercase text-neutral-500">Drives</p>
+              <div className="flex flex-wrap gap-2">
+                {browse.drives.map((d) => (
+                  <button
+                    key={d}
+                    onClick={() => loadBrowse(d)}
+                    className="rounded bg-neutral-800 px-4 py-2 hover:bg-neutral-700"
+                  >
+                    {d}
+                  </button>
+                ))}
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="mb-2 flex items-center gap-2">
+                <Button
+                  onClick={() =>
+                    browse.parent ? loadBrowse(browse.parent) : loadBrowse(undefined)
+                  }
+                >
+                  ⬆ Up
+                </Button>
+                <span className="truncate text-neutral-300" title={browse.path}>
+                  {browse.path}
+                </span>
+              </div>
+              <div className="mb-3 max-h-64 overflow-y-auto rounded border border-neutral-800">
+                {browse.dirs.length === 0 ? (
+                  <p className="px-3 py-2 text-neutral-500">No subfolders</p>
+                ) : (
+                  browse.dirs.map((d) => (
+                    <button
+                      key={d}
+                      onClick={() => loadBrowse(`${browse.path}\\${d}`)}
+                      className="block w-full truncate px-3 py-1.5 text-left hover:bg-neutral-800"
+                    >
+                      📁 {d}
+                    </button>
+                  ))
+                )}
+              </div>
+              <Button kind="primary" onClick={() => void createSession(browse.path!)} disabled={!!busy}>
+                Open session in {browse.path}
+              </Button>
+            </>
+          )}
+        </div>
+      )}
+
+      {mode === "github" && (
+        <div>
+          {ghError ? (
+            <p className="rounded bg-amber-950 px-3 py-2 text-amber-300">{ghError}</p>
+          ) : repos === null ? (
+            <p className="text-neutral-400">Loading your repositories…</p>
+          ) : repos.length === 0 ? (
+            <p className="text-neutral-400">No repositories found for your GitHub account.</p>
+          ) : (
+            <div className="max-h-72 overflow-y-auto rounded border border-neutral-800">
+              {repos.map((r) => (
+                <div
+                  key={r.nameWithOwner}
+                  className="flex items-center justify-between border-b border-neutral-800 px-3 py-1.5 last:border-b-0"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate font-medium">{r.nameWithOwner}</p>
+                    <p className="text-xs text-neutral-500">
+                      updated {new Date(r.updatedAt).toLocaleDateString()}
+                      {r.cloned && " · already cloned"}
+                    </p>
+                  </div>
+                  <Button kind="primary" onClick={() => void cloneAndOpen(r)} disabled={!!busy}>
+                    {r.cloned ? "Open existing" : "Clone & open"}
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {mode === "blank" && (
+        <div>
+          <p className="mb-3 text-neutral-400">
+            A plain PowerShell window in your home directory.
+          </p>
+          <Button kind="primary" onClick={() => void createSession()} disabled={!!busy}>
+            Open blank shell
+          </Button>
+        </div>
+      )}
+
+      <div className="mt-4 flex flex-col gap-2 border-t border-neutral-700 pt-3">
+        <label className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            checked={autoClaude}
+            onChange={(e) => setAutoClaude(e.target.checked)}
+          />
+          <span>
+            Auto-start <code className="rounded bg-neutral-800 px-1">claude</code> in the new
+            session
+          </span>
+        </label>
+        <label className={`flex items-center gap-2 ${!autoClaude ? "opacity-40" : ""}`}>
+          <input
+            type="checkbox"
+            checked={useWorktree}
+            disabled={!autoClaude}
+            onChange={(e) => setUseWorktree(e.target.checked)}
+          />
+          <span>Start in a git worktree</span>
+          {useWorktree && autoClaude && (
+            <input
+              type="text"
+              value={worktreeName}
+              onChange={(e) => setWorktreeName(e.target.value)}
+              placeholder="name (optional)"
+              className="w-40 rounded border border-neutral-700 bg-neutral-800 px-2 py-0.5 text-sm"
+            />
+          )}
+        </label>
+      </div>
+    </Modal>
+  );
+}

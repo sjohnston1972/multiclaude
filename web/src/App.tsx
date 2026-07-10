@@ -13,6 +13,7 @@ import {
 import { api, AppSettings, AppState, SessionInfo } from "./api";
 import TerminalPane from "./TerminalPane";
 import SessionListModal from "./SessionListModal";
+import NewSessionDialog from "./NewSessionDialog";
 import { Button, Modal, ToolbarButton } from "./components";
 
 const GLOBAL_LAYOUT_OPTS = {
@@ -43,6 +44,7 @@ export default function App() {
   const [settings, setSettings] = useState<AppSettings>({ fontSize: 14, scrollback: 10000 });
   const [error, setError] = useState<string | null>(null);
   const [showSessions, setShowSessions] = useState(false);
+  const [showNew, setShowNew] = useState(false);
   const [confirmClose, setConfirmClose] = useState<{
     tabId: string;
     sessionId: string;
@@ -110,15 +112,6 @@ export default function App() {
     },
     [model, persistLayout]
   );
-
-  const newBlankSession = useCallback(async () => {
-    try {
-      const s = await api<SessionInfo>("/api/sessions", { method: "POST", body: {} });
-      addSessionTab(s);
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  }, [addSessionTab]);
 
   // ------------------------------------------------- close tab confirmation
   const onAction = useCallback(
@@ -272,7 +265,7 @@ export default function App() {
         <span className="mr-2 select-none text-sm font-semibold text-neutral-100">
           multi<span className="text-orange-400">claude</span>
         </span>
-        <ToolbarButton onClick={() => void newBlankSession()} title="Open a new terminal session">
+        <ToolbarButton onClick={() => setShowNew(true)} title="Open a new terminal session">
           ＋ New session
         </ToolbarButton>
         <ToolbarButton onClick={() => setShowSessions(true)} title="All live sessions">
@@ -300,6 +293,13 @@ export default function App() {
           onModelChange={persistLayout}
         />
       </div>
+
+      {showNew && (
+        <NewSessionDialog
+          onCreated={addSessionTab}
+          onClose={() => setShowNew(false)}
+        />
+      )}
 
       {showSessions && (
         <SessionListModal

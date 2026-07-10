@@ -6,6 +6,7 @@ import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { SessionManager } from "./sessionManager.js";
 import { readState, writeState, rememberFolder } from "./stateStore.js";
+import { registerLauncherRoutes } from "./launcher.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -61,7 +62,11 @@ app.get("/api/health", async () => ({
 app.get("/api/sessions", async () => sessions.list());
 
 app.post("/api/sessions", async (req, reply) => {
-  const body = (req.body ?? {}) as { cwd?: string };
+  const body = (req.body ?? {}) as {
+    cwd?: string;
+    autoClaude?: boolean;
+    worktree?: string | null;
+  };
   let cwd: string | undefined;
   if (body.cwd) {
     const resolved = path.resolve(body.cwd);
@@ -72,8 +77,25 @@ app.post("/api/sessions", async (req, reply) => {
     cwd = resolved;
     rememberFolder(resolved);
   }
+
+  // "Auto-start claude" types `claude` into the fresh shell; the worktree
+  // option makes it `claude --worktree <name>` so parallel sessions on the
+  // same repo don't collide.
+  let initialCommand: string | undefined;
+  if (body.autoClaude) {
+    if (body.worktree) {
+      if (!/^[A-Za-z0-9._-]{1,50}$/.test(body.worktree)) {
+        reply.code(400);
+        return { error: "Worktree name may only contain letters, numbers, dots, dashes" };
+      }
+      initialCommand = `claude --worktree ${body.worktree}`;
+    } else {
+      initialCommand = "claude";
+    }
+  }
+
   try {
-    const session = sessions.create({ cwd });
+    const session = sessions.create({ cwd, initialCommand });
     return sessions.info(session);
   } catch (err) {
     reply.code(500);
@@ -110,6 +132,8 @@ app.delete("/api/sessions/:id", async (req, reply) => {
 // ---------------------------------------------------------------------------
 // REST API: persisted state (layout, settings, recent folders)
 // ---------------------------------------------------------------------------
+
+registerLauncherRoutes(app);
 
 app.get("/api/state", async () => readState());
 
