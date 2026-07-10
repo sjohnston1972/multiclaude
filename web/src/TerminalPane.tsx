@@ -3,6 +3,7 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
+import { SearchAddon } from "@xterm/addon-search";
 import type { TabNode } from "flexlayout-react";
 
 type ConnState = "connecting" | "connected" | "disconnected" | "exited";
@@ -30,8 +31,21 @@ export default function TerminalPane({
   const containerRef = useRef<HTMLDivElement>(null);
   const [state, setState] = useState<ConnState>("connecting");
   const [statusMsg, setStatusMsg] = useState("Connecting…");
+  const [notice, setNotice] = useState<string | null>(null);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<(() => void) | null>(null);
+  const searchRef = useRef<SearchAddon | null>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const wsRef = useRef<WebSocket | null>(null);
+  const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const showNotice = (msg: string) => {
+    setNotice(msg);
+    if (noticeTimer.current) clearTimeout(noticeTimer.current);
+    noticeTimer.current = setTimeout(() => setNotice(null), 5000);
+  };
 
   useEffect(() => {
     const container = containerRef.current;
@@ -52,7 +66,10 @@ export default function TerminalPane({
     });
     termRef.current = term;
     const fit = new FitAddon();
+    const search = new SearchAddon();
+    searchRef.current = search;
     term.loadAddon(fit);
+    term.loadAddon(search);
     term.loadAddon(new WebLinksAddon());
     term.loadAddon(new Unicode11Addon());
     term.unicode.activeVersion = "11";
@@ -100,6 +117,7 @@ export default function TerminalPane({
 
       const proto = location.protocol === "https:" ? "wss" : "ws";
       ws = new WebSocket(`${proto}://${location.host}/ws?session=${encodeURIComponent(sessionId)}`);
+      wsRef.current = ws;
 
       ws.onopen = () => {
         setState("connected");
@@ -154,6 +172,76 @@ export default function TerminalPane({
       }
     });
 
+    // App-level shortcuts must not reach the shell: search + explicit copy
+    // are handled here; new-tab / cycle-tabs bubble up to the window handler.
+    term.attachCustomKeyEventHandler((e) => {
+      if (e.type !== "keydown") return true;
+      if (e.ctrlKey && e.shiftKey && e.code === "KeyF") {
+        setSearchOpen(true);
+        setTimeout(() => searchInputRef.current?.focus(), 0);
+        return false;
+      }
+      if (e.ctrlKey && e.shiftKey && e.code === "KeyC") {
+        const sel = term.getSelection();
+        if (sel) navigator.clipboard.writeText(sel).catch(() => {});
+        return false;
+      }
+      if (e.ctrlKey && e.shiftKey && e.code === "KeyT") return false; // window handler opens dialog
+      if (e.ctrlKey && e.code === "Tab") return false; // window handler cycles panes
+      return true;
+    });
+
+    // Image paste & drop: upload to the server, then type the quoted file
+    // path into the shell so Claude Code can read the image itself.
+    const uploadImage = async (blob: Blob) => {
+      showNotice("Uploading image…");
+      try {
+        const res = await fetch("/api/images", {
+          method: "POST",
+          headers: { "content-type": blob.type },
+          body: blob,
+        });
+        const j = (await res.json().catch(() => ({}))) as { path?: string; error?: string };
+        if (!res.ok || !j.path) throw new Error(j.error ?? "upload failed");
+        if (ws?.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: "input", data: `"${j.path}" ` }));
+        }
+        showNotice("Image saved — path typed into the terminal");
+      } catch (err) {
+        showNotice(`Couldn't upload the image: ${(err as Error).message}`);
+      }
+    };
+
+    const onPaste = (e: ClipboardEvent) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (const item of items) {
+        if (item.type.startsWith("image/")) {
+          const file = item.getAsFile();
+          if (file) {
+            e.preventDefault();
+            void uploadImage(file);
+            return;
+          }
+        }
+      }
+    };
+    const onDragOver = (e: DragEvent) => {
+      if (e.dataTransfer?.types.includes("Files")) e.preventDefault();
+    };
+    const onDrop = (e: DragEvent) => {
+      const files = e.dataTransfer?.files;
+      if (!files?.length) return;
+      const image = [...files].find((f) => f.type.startsWith("image/"));
+      if (image) {
+        e.preventDefault();
+        void uploadImage(image);
+      }
+    };
+    container.addEventListener("paste", onPaste);
+    container.addEventListener("dragover", onDragOver);
+    container.addEventListener("drop", onDrop);
+
     // Only apply a fit when cols/rows actually change — refitting on every
     // pixel-level container change makes the scrollbar flap on and off.
     let fitQueued = false;
@@ -193,7 +281,11 @@ export default function TerminalPane({
     return () => {
       disposed = true;
       if (reconnectTimer) clearTimeout(reconnectTimer);
+      if (noticeTimer.current) clearTimeout(noticeTimer.current);
       node?.removeEventListener("visibility");
+      container.removeEventListener("paste", onPaste);
+      container.removeEventListener("dragover", onDragOver);
+      container.removeEventListener("drop", onDrop);
       resizeObserver.disconnect();
       dataSub.dispose();
       selSub.dispose();
@@ -201,6 +293,8 @@ export default function TerminalPane({
       term.dispose();
       termRef.current = null;
       fitRef.current = null;
+      searchRef.current = null;
+      wsRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId]);
@@ -214,14 +308,64 @@ export default function TerminalPane({
     fitRef.current?.();
   }, [fontSize, scrollback]);
 
+  const closeSearch = () => {
+    setSearchOpen(false);
+    searchRef.current?.clearDecorations();
+    termRef.current?.focus();
+  };
+
   return (
     <div className="relative h-full w-full bg-[#0a0a0a]">
       {/* No padding here: the fit addon measures this element, and padding
           makes it size the terminal too large, causing scrollbar flicker. */}
       <div ref={containerRef} className="h-full w-full overflow-hidden" />
+
+      {searchOpen && (
+        <div className="absolute right-3 top-2 z-20 flex items-center gap-1 rounded border border-neutral-700 bg-neutral-900 p-1 shadow-lg">
+          <input
+            ref={searchInputRef}
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && e.shiftKey) searchRef.current?.findPrevious(searchQuery);
+              else if (e.key === "Enter") searchRef.current?.findNext(searchQuery);
+              else if (e.key === "Escape") closeSearch();
+            }}
+            placeholder="Search… (Enter next, Shift+Enter prev)"
+            className="w-56 rounded bg-neutral-800 px-2 py-1 text-sm text-neutral-100 outline-none"
+          />
+          <button
+            onClick={() => searchRef.current?.findPrevious(searchQuery)}
+            className="rounded px-1.5 py-0.5 text-neutral-300 hover:bg-neutral-700"
+            title="Previous match (Shift+Enter)"
+          >
+            ↑
+          </button>
+          <button
+            onClick={() => searchRef.current?.findNext(searchQuery)}
+            className="rounded px-1.5 py-0.5 text-neutral-300 hover:bg-neutral-700"
+            title="Next match (Enter)"
+          >
+            ↓
+          </button>
+          <button
+            onClick={closeSearch}
+            className="rounded px-1.5 py-0.5 text-neutral-300 hover:bg-neutral-700"
+            title="Close (Esc)"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {state !== "connected" && statusMsg && (
         <div className="absolute left-1/2 top-2 z-10 -translate-x-1/2 rounded bg-neutral-800 px-3 py-1 text-sm text-neutral-200 shadow">
           {statusMsg}
+        </div>
+      )}
+      {notice && (
+        <div className="absolute bottom-2 left-1/2 z-10 -translate-x-1/2 rounded bg-neutral-800 px-3 py-1 text-sm text-neutral-200 shadow">
+          {notice}
         </div>
       )}
     </div>

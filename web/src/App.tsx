@@ -224,6 +224,38 @@ export default function App() {
     [model, collectTerminalTabs]
   );
 
+  // ------------------------------------------------------ keyboard shortcuts
+  const cycleTab = useCallback(
+    (dir: 1 | -1) => {
+      if (!model) return;
+      const tabs = collectTerminalTabs();
+      if (tabs.length < 2) return;
+      const active = model.getActiveTabset()?.getSelectedNode() as TabNode | undefined;
+      const idx = active ? tabs.findIndex((t) => t.getId() === active.getId()) : -1;
+      const next = tabs[(idx + dir + tabs.length) % tabs.length];
+      model.doAction(Actions.selectTab(next.getId()));
+      const parent = next.getParent();
+      if (parent) model.doAction(Actions.setActiveTabset(parent.getId()));
+    },
+    [model, collectTerminalTabs]
+  );
+
+  useEffect(() => {
+    // Note: some browsers reserve Ctrl+Tab / Ctrl+Shift+T for themselves and
+    // never let a page see them — these work where the browser allows it.
+    const onKey = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.shiftKey && e.code === "KeyT") {
+        e.preventDefault();
+        setShowNew(true);
+      } else if (e.ctrlKey && e.code === "Tab") {
+        e.preventDefault();
+        cycleTab(e.shiftKey ? -1 : 1);
+      }
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [cycleTab]);
+
   // ---------------------------------------------------------------- factory
   const factory = useCallback(
     (node: TabNode) => {

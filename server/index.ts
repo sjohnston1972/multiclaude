@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { SessionManager } from "./sessionManager.js";
 import { readState, writeState, rememberFolder } from "./stateStore.js";
 import { registerLauncherRoutes } from "./launcher.js";
+import { pruneOldImages, registerImageRoutes } from "./images.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -134,6 +135,8 @@ app.delete("/api/sessions/:id", async (req, reply) => {
 // ---------------------------------------------------------------------------
 
 registerLauncherRoutes(app);
+registerImageRoutes(app);
+pruneOldImages();
 
 app.get("/api/state", async () => readState());
 
