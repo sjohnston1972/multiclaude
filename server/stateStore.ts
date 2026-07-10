@@ -29,6 +29,37 @@ export const dataDir = path.join(
 );
 export const imagesDir = path.join(dataDir, "images");
 const stateFile = path.join(dataDir, "state.json");
+const sessionsFile = path.join(dataDir, "sessions.json");
+
+/**
+ * A restorable session: enough to recreate it (folder + startup command) after
+ * a server restart. Kept in a separate file from app state because it has a
+ * different lifecycle (rewritten as sessions come and go).
+ */
+export interface SessionSpec {
+  id: string;
+  cwd: string;
+  initialCommand?: string;
+  title: string;
+}
+
+export function readSessionSpecs(): SessionSpec[] {
+  try {
+    const raw = JSON.parse(fs.readFileSync(sessionsFile, "utf8"));
+    return Array.isArray(raw)
+      ? raw.filter((s) => s && typeof s.id === "string" && typeof s.cwd === "string")
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+export function writeSessionSpecs(specs: SessionSpec[]): void {
+  fs.mkdirSync(dataDir, { recursive: true });
+  const tmp = sessionsFile + ".tmp";
+  fs.writeFileSync(tmp, JSON.stringify(specs, null, 2));
+  fs.renameSync(tmp, sessionsFile);
+}
 
 export function readState(): AppState {
   try {

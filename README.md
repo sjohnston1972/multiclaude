@@ -94,6 +94,14 @@ run the production version yourself: `npm run build` then `npm start`
   session stranded with no pane. (A side effect: sessions you "kept running in
   the background" reappear as tabs after a refresh — a reload shows you
   everything that's alive.)
+- **Workspace restore across a restart.** A browser refresh keeps sessions
+  because the server owns them — but a *server* restart (reboot, crash, or a
+  code reload) ends the shells. multiclaude remembers each session's folder and
+  startup command, and on the next launch **asks** whether to restore them:
+  "Restore N sessions from last time?" Restoring reopens the shells in the same
+  folders and re-runs whatever they auto-started (e.g. `claude`) — the running
+  program can't be brought back to life, but you land back in your workspace
+  instead of rebuilding it. Sessions you explicitly killed aren't offered.
 - **Tab titles** show the folder name and current git branch, refreshed
   automatically. Double-click a tab to rename it yourself (auto-renaming
   then leaves it alone). A green dot appears on a background tab when its
@@ -171,4 +179,5 @@ node scripts/features-test.mjs   # broadcast, reveal, bell field, auto-claude ti
 node scripts/create-test.mjs     # create-folder + create-repo validation
 npx tsx scripts/reconcile-test.ts # layout↔live-session reconciliation on load
 node scripts/git-features-test.mjs # git-init, isRepo detection, publish validation
+node scripts/restore-test.mjs    # workspace-restore API (full flow needs a restart)
 ```

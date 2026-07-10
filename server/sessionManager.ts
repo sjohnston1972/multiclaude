@@ -3,6 +3,7 @@ import { execFile, execFileSync, execSync } from "node:child_process";
 import crypto from "node:crypto";
 import os from "node:os";
 import path from "node:path";
+import { readSessionSpecs, writeSessionSpecs, type SessionSpec } from "./stateStore.js";
 
 /**
  * SessionManager owns the real PowerShell processes (via ConPTY).
@@ -23,6 +24,8 @@ export interface Session {
   cwd: string;
   createdAt: number;
   title: string;
+  /** The command typed into the shell at start (e.g. "claude …"), remembered so the session can be restored. */
+  initialCommand?: string;
   branch: string | null;
   /** Whether the working directory is inside a git repo (true even before the first commit). */
   isRepo: boolean;
@@ -98,15 +101,86 @@ export class SessionManager {
   private sessions = new Map<string, Session>();
   private shell: string;
   readonly shellFriendly: string;
+  /** True while the server is shutting down — stops us pruning the restore manifest as ptys die. */
+  private shuttingDown = false;
+  /** Sessions from the last run that aren't live yet — offered to the browser for restore. */
+  private restorable: SessionSpec[];
+  /** Debounce handle so bursts of create/exit coalesce into one manifest write. */
+  private manifestTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor() {
     const detected = detectShell();
     this.shell = detected.shell;
     this.shellFriendly = detected.friendly;
 
+    // Sessions that were alive when the server last stopped, ready to restore.
+    this.restorable = readSessionSpecs();
+
     // Keep session titles' git branch fresh (cheap: one git call per session).
     const timer = setInterval(() => this.refreshBranches(), BRANCH_REFRESH_MS);
     timer.unref();
+  }
+
+  /**
+   * Write the restore manifest now: live session specs plus any not-yet-resolved
+   * restorable ones. Best-effort — a failed write (e.g. a transient Windows file
+   * lock) must never crash the server, and we never write while shutting down
+   * (that would clobber the very sessions we want to restore next launch).
+   */
+  private writeManifestNow(): void {
+    if (this.shuttingDown) return;
+    try {
+      const live: SessionSpec[] = [...this.sessions.values()].map((s) => ({
+        id: s.id,
+        cwd: s.cwd,
+        initialCommand: s.initialCommand,
+        title: s.title,
+      }));
+      const liveIds = new Set(live.map((s) => s.id));
+      writeSessionSpecs([...live, ...this.restorable.filter((s) => !liveIds.has(s.id))]);
+    } catch (err) {
+      console.error("multiclaude: couldn't write the restore manifest:", (err as Error).message);
+    }
+  }
+
+  /** Coalesce rapid create/exit churn into a single debounced manifest write. */
+  private persistManifest(): void {
+    if (this.manifestTimer) return;
+    this.manifestTimer = setTimeout(() => {
+      this.manifestTimer = null;
+      this.writeManifestNow();
+    }, 250);
+    this.manifestTimer.unref?.();
+  }
+
+  /** Write any pending manifest changes immediately — call on graceful shutdown. */
+  flushManifest(): void {
+    if (this.manifestTimer) {
+      clearTimeout(this.manifestTimer);
+      this.manifestTimer = null;
+    }
+    this.writeManifestNow();
+  }
+
+  /** Restorable sessions from the previous run that aren't already live. */
+  restorableSpecs(): SessionSpec[] {
+    return this.restorable.filter((s) => !this.sessions.has(s.id));
+  }
+
+  /** Respawn every restorable session with its original id + startup command. */
+  restore(): Session[] {
+    const created = this.restorable
+      .filter((s) => !this.sessions.has(s.id))
+      .map((s) => this.create({ id: s.id, cwd: s.cwd, initialCommand: s.initialCommand }));
+    this.restorable = [];
+    this.writeManifestNow(); // resolve the manifest promptly, not on a debounce
+    return created;
+  }
+
+  /** User chose "start fresh" — forget the restorable set. */
+  dismissRestore(): void {
+    this.restorable = [];
+    this.writeManifestNow();
   }
 
   get(id: string): Session | undefined {
@@ -151,6 +225,7 @@ export class SessionManager {
       cwd: workingDir,
       createdAt: Date.now(),
       title: path.basename(workingDir) || workingDir,
+      initialCommand: opts.initialCommand,
       branch: null,
       isRepo: false,
       lastOutputAt: Date.now(),
@@ -184,6 +259,10 @@ export class SessionManager {
       session.exited = true;
       for (const listener of session.exitListeners) listener(exitCode);
       this.sessions.delete(id);
+      // A session that ends during normal operation (user killed it or typed
+      // exit) shouldn't be restored later — drop it from the manifest. During
+      // shutdown we keep it, so it's there to restore next launch.
+      if (!this.shuttingDown) this.persistManifest();
     });
 
     if (opts.initialCommand) {
@@ -202,6 +281,7 @@ export class SessionManager {
     }
 
     this.sessions.set(id, session);
+    this.persistManifest();
     this.refreshGit(session);
     return session;
   }
@@ -300,8 +380,13 @@ export class SessionManager {
     });
   }
 
-  /** Kill every session — used on server shutdown (sync: exit follows immediately). */
+  /**
+   * Kill every session — used on server shutdown (sync: exit follows
+   * immediately). Sets shuttingDown so the exit handlers keep these sessions in
+   * the restore manifest instead of pruning them.
+   */
   killAll(): void {
+    this.shuttingDown = true;
     for (const s of this.sessions.values()) {
       if (!s.exited) killTreeSync(s.pty.pid);
     }

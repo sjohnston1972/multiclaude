@@ -24,6 +24,7 @@ import NewSessionDialog from "./NewSessionDialog";
 import SettingsModal from "./SettingsModal";
 import HealthModal from "./HealthModal";
 import BroadcastModal from "./BroadcastModal";
+import RestoreModal, { type RestorableSpec } from "./RestoreModal";
 import { updateFavicon } from "./favicon";
 import { notify } from "./notifications";
 import { Button, Modal, ToolbarButton } from "./components";
@@ -48,6 +49,9 @@ export default function App() {
     sessionId: string;
     name: string;
   } | null>(null);
+  const [restorable, setRestorable] = useState<RestorableSpec[] | null>(null);
+  const [restoreBusy, setRestoreBusy] = useState(false);
+  const pendingLayoutRef = useRef<unknown | null>(null);
   const layoutRef = useRef<ILayoutApi | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const didLoad = useRef(false);
@@ -58,6 +62,19 @@ export default function App() {
   // session "detached" with no pane — even if the saved layout is empty or
   // stale. Only when there are genuinely no sessions and no tabs do we spawn a
   // fresh default one.
+  // Build the model from a (possibly null) saved layout, reconciling against
+  // the sessions the server currently holds; start a fresh one if empty.
+  const buildModel = useCallback(async (layout: unknown | null) => {
+    const live = await api<SessionInfo[]>("/api/sessions").catch(() => []);
+    const { model: m, needsDefault, tabsetId } = reconcileLayout(layout as IJsonModel | null, live);
+    if (needsDefault && tabsetId) {
+      const s = await api<SessionInfo>("/api/sessions", { method: "POST", body: {} });
+      m.doAction(Actions.addTab(tabJson(s), tabsetId, DockLocation.CENTER, -1, true));
+    }
+    setModel(m);
+    api("/api/state", { method: "PUT", body: { layout: m.toJson() } }).catch(() => {});
+  }, []);
+
   useEffect(() => {
     if (didLoad.current) return; // guard React 18 StrictMode double-invoke in dev
     didLoad.current = true;
@@ -65,26 +82,46 @@ export default function App() {
       try {
         const state = await api<AppState>("/api/state");
         setSettings(state.settings);
-        const live = await api<SessionInfo[]>("/api/sessions").catch(() => []);
-
-        const { model: m, needsDefault, tabsetId } = reconcileLayout(
-          state.layout as IJsonModel | null,
-          live
-        );
-
-        // Nothing running and nothing to show → start one fresh session.
-        if (needsDefault && tabsetId) {
-          const s = await api<SessionInfo>("/api/sessions", { method: "POST", body: {} });
-          m.doAction(Actions.addTab(tabJson(s), tabsetId, DockLocation.CENTER, -1, true));
+        // If the server was restarted, there are sessions to offer back — ask
+        // before respawning anything, and don't render the stale layout yet.
+        const specs = await api<RestorableSpec[]>("/api/sessions/restorable").catch(() => []);
+        if (specs.length > 0) {
+          pendingLayoutRef.current = state.layout ?? null;
+          setRestorable(specs);
+          return;
         }
-
-        setModel(m);
-        api("/api/state", { method: "PUT", body: { layout: m.toJson() } }).catch(() => {});
+        await buildModel(state.layout ?? null);
       } catch (e) {
         setError((e as Error).message);
       }
     })();
-  }, []);
+  }, [buildModel]);
+
+  const doRestore = useCallback(async () => {
+    setRestoreBusy(true);
+    try {
+      // Respawns the sessions with their original ids, so the saved layout
+      // re-attaches to them exactly as it was.
+      await api("/api/sessions/restore", { method: "POST" });
+      setRestorable(null);
+      await buildModel(pendingLayoutRef.current);
+    } catch (e) {
+      setError((e as Error).message);
+      setRestoreBusy(false);
+    }
+  }, [buildModel]);
+
+  const doStartFresh = useCallback(async () => {
+    setRestoreBusy(true);
+    try {
+      await api("/api/sessions/restore/dismiss", { method: "POST" });
+      setRestorable(null);
+      await buildModel(null); // discard the old layout; open one fresh session
+    } catch (e) {
+      setError((e as Error).message);
+      setRestoreBusy(false);
+    }
+  }, [buildModel]);
 
   // ------------------------------------------------------------------ save
   const persistLayout = useCallback((m: Model) => {
@@ -415,7 +452,18 @@ export default function App() {
   if (!model) {
     return (
       <div className="flex h-full items-center justify-center bg-neutral-950 text-neutral-400">
-        {error ? <span className="text-red-400">{error}</span> : "Starting…"}
+        {restorable ? (
+          <RestoreModal
+            specs={restorable}
+            busy={restoreBusy}
+            onRestore={() => void doRestore()}
+            onStartFresh={() => void doStartFresh()}
+          />
+        ) : error ? (
+          <span className="text-red-400">{error}</span>
+        ) : (
+          "Starting…"
+        )}
       </div>
     );
   }

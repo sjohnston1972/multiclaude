@@ -93,6 +93,17 @@ app.get("/api/health", async () => ({
 
 app.get("/api/sessions", async () => sessions.list());
 
+// Workspace restore: sessions that were alive when the server last stopped and
+// aren't running now. The browser offers to bring them back on load.
+app.get("/api/sessions/restorable", async () => sessions.restorableSpecs());
+
+app.post("/api/sessions/restore", async () => sessions.restore().map((s) => sessions.info(s)));
+
+app.post("/api/sessions/restore/dismiss", async () => {
+  sessions.dismissRestore();
+  return { ok: true };
+});
+
 app.post("/api/sessions", async (req, reply) => {
   const body = (req.body ?? {}) as {
     cwd?: string;
@@ -307,11 +318,22 @@ async function main() {
 // processes behind.
 function shutdown() {
   console.log("\nshutting down — killing sessions...");
+  sessions.flushManifest(); // persist the current sessions so they can be restored
   sessions.killAll();
   process.exit(0);
 }
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
+
+// Backstop: for a local single-user tool, a logged survivor beats a silent
+// death. Log stray errors and keep the server (and everyone's sessions) up
+// rather than letting one bad async throw take everything down.
+process.on("uncaughtException", (err) => {
+  console.error("multiclaude: uncaught exception (server kept running):", err);
+});
+process.on("unhandledRejection", (reason) => {
+  console.error("multiclaude: unhandled rejection (server kept running):", reason);
+});
 
 main().catch((err) => {
   console.error("Failed to start server:", err);
