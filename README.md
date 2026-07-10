@@ -99,6 +99,12 @@ run the production version yourself: `npm run build` then `npm start`
   then leaves it alone). A green dot appears on a background tab when its
   session rings the terminal bell — which is what Claude Code does when it
   finishes and wants your attention.
+- **Attention routing.** The number of sessions wanting attention shows up in
+  the **browser tab title** (`(2) multiclaude`) and as a red badge on the
+  **favicon**, so you can tell from your browser's tab strip — even when
+  multiclaude isn't the tab you're looking at. The Sessions list floats those
+  sessions to the top with a green dot. Turn on **desktop notifications** in
+  Settings to get a popup when a background session finishes.
 - **Images**: paste a screenshot (Ctrl+V) or drop an image file onto a
   terminal. It's saved locally and the file path is typed into the terminal,
   which is how Claude Code reads images. Saved images are pruned after 7 days.

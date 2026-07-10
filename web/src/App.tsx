@@ -24,6 +24,8 @@ import NewSessionDialog from "./NewSessionDialog";
 import SettingsModal from "./SettingsModal";
 import HealthModal from "./HealthModal";
 import BroadcastModal from "./BroadcastModal";
+import { updateFavicon } from "./favicon";
+import { notify } from "./notifications";
 import { Button, Modal, ToolbarButton } from "./components";
 
 export default function App() {
@@ -39,6 +41,8 @@ export default function App() {
   const lastSeenRef = useRef<Record<string, number>>({});
   const autoTitleRef = useRef<Record<string, string>>({});
   const loadTimeRef = useRef(Date.now());
+  const sessionTitlesRef = useRef<Record<string, string>>({});
+  const notifiedRef = useRef<Set<string>>(new Set());
   const [confirmClose, setConfirmClose] = useState<{
     tabId: string;
     sessionId: string;
@@ -270,6 +274,7 @@ export default function App() {
         const sid = (tab.getConfig() as { sessionId: string })?.sessionId;
         const s = sid ? byId.get(sid) : undefined;
         if (!s) return;
+        sessionTitlesRef.current[sid] = tab.getName() || s.title;
 
         if (tab.isVisible()) {
           // Seen right now — no dot.
@@ -309,6 +314,32 @@ export default function App() {
     },
     [dots]
   );
+
+  // ----------------------------------------- attention routing (title/favicon)
+  // Whenever the set of sessions wanting attention changes: reflect the count
+  // in the browser tab title and favicon badge, and fire a one-shot desktop
+  // notification for each session that has newly started asking for attention.
+  useEffect(() => {
+    const attentionIds = Object.keys(dots).filter((id) => dots[id]);
+    const count = attentionIds.length;
+
+    document.title = count > 0 ? `(${count}) multiclaude` : "multiclaude";
+    updateFavicon(count);
+
+    for (const id of attentionIds) {
+      if (!notifiedRef.current.has(id)) {
+        notifiedRef.current.add(id);
+        const name = sessionTitlesRef.current[id] ?? "A session";
+        notify("multiclaude", `${name} wants your attention`);
+      }
+    }
+    // Allow a session to notify again next time it goes quiet then rings.
+    for (const id of [...notifiedRef.current]) {
+      if (!dots[id]) notifiedRef.current.delete(id);
+    }
+  }, [dots]);
+
+  const attentionIds = new Set(Object.keys(dots).filter((id) => dots[id]));
 
   // ------------------------------------------------------ keyboard shortcuts
   const cycleTab = useCallback(
@@ -463,6 +494,7 @@ export default function App() {
       {showSessions && (
         <SessionListModal
           openSessionIds={openSessionIds}
+          attentionIds={attentionIds}
           onReattach={reattach}
           onKill={killFromList}
           onKillAll={killAllFromList}

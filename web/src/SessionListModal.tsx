@@ -8,6 +8,7 @@ import { Button, Modal } from "./components";
  */
 export default function SessionListModal({
   openSessionIds,
+  attentionIds,
   onReattach,
   onKill,
   onKillAll,
@@ -15,6 +16,7 @@ export default function SessionListModal({
   onClose,
 }: {
   openSessionIds: Set<string>;
+  attentionIds: Set<string>;
   onReattach: (s: SessionInfo) => void;
   onKill: (s: SessionInfo) => Promise<void>;
   onKillAll: () => Promise<void>;
@@ -97,9 +99,17 @@ export default function SessionListModal({
             </tr>
           </thead>
           <tbody>
-            {sessions.map((s) => (
+            {[...sessions]
+              .sort((a, b) => Number(attentionIds.has(b.id)) - Number(attentionIds.has(a.id)))
+              .map((s) => (
               <tr key={s.id} className="border-t border-neutral-800">
                 <td className="py-2 pr-3 font-medium">
+                  {attentionIds.has(s.id) && (
+                    <span
+                      className="mr-1.5 inline-block h-2 w-2 rounded-full bg-emerald-400 align-middle"
+                      title="Wants attention (rang the bell since you last looked)"
+                    />
+                  )}
                   {s.title}
                   {s.isRepo && (
                     <span
