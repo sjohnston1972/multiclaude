@@ -111,9 +111,23 @@ export default function TerminalPane({ sessionId }: { sessionId: string }) {
     });
 
     // When the pane changes size in the browser, refit xterm and tell the pty.
+    // Only apply a fit when cols/rows actually change — refitting on every
+    // pixel-level container change makes the scrollbar flap on and off.
+    let fitQueued = false;
+    const fitIfChanged = () => {
+      fitQueued = false;
+      if (disposed) return;
+      const dims = fit.proposeDimensions();
+      if (dims && (dims.cols !== term.cols || dims.rows !== term.rows)) {
+        fit.fit();
+        sendResize();
+      }
+    };
     const resizeObserver = new ResizeObserver(() => {
-      fit.fit();
-      sendResize();
+      if (!fitQueued) {
+        fitQueued = true;
+        requestAnimationFrame(fitIfChanged);
+      }
     });
     resizeObserver.observe(container);
 
@@ -132,7 +146,9 @@ export default function TerminalPane({ sessionId }: { sessionId: string }) {
 
   return (
     <div className="relative h-full w-full">
-      <div ref={containerRef} className="h-full w-full p-1" />
+      {/* No padding here: the fit addon measures this element, and padding
+          makes it size the terminal too large, causing scrollbar flicker. */}
+      <div ref={containerRef} className="h-full w-full overflow-hidden" />
       {state !== "connected" && statusMsg && (
         <div className="absolute left-1/2 top-2 -translate-x-1/2 rounded bg-neutral-800 px-3 py-1 text-sm text-neutral-200 shadow">
           {statusMsg}
