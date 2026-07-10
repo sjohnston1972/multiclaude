@@ -1,9 +1,10 @@
 # multiclaude
 
-Run and manage multiple Claude Code sessions in a single browser window. The
-server holds real PowerShell terminals; the browser is just a viewer. Close or
-refresh the browser and your sessions keep running — reconnecting reattaches
-and replays recent output, like plugging back into a console port.
+Run and manage multiple Claude Code sessions in a single browser window —
+tabs, draggable split layouts, each pane a full real PowerShell terminal. The
+server holds the terminals; the browser is just a viewer. Close or refresh the
+browser and your sessions keep running — reconnecting reattaches and replays
+recent output, like plugging back into a console port.
 
 **Security note:** this app gives whoever connects a real shell on your
 machine. It listens on `127.0.0.1` only and refuses to start on any other
@@ -15,7 +16,8 @@ address. Never expose it through a tunnel or reverse proxy.
 - **git** — https://git-scm.com
 - **PowerShell 7** (`pwsh`) — optional but recommended: `winget install Microsoft.PowerShell`.
   If it's not installed, the app falls back to built-in Windows PowerShell.
-- **gh** (GitHub CLI) — only needed from Phase 3 onward for the repo picker.
+- **gh** (GitHub CLI) — needed for the GitHub repo picker: `winget install GitHub.cli`,
+  then `gh auth login` once.
 
 ## Install
 
@@ -29,8 +31,7 @@ npm install
 npm run dev
 ```
 
-Then open **http://127.0.0.1:5173** in your browser. You get a full-screen
-PowerShell terminal. Type `claude` to start a Claude Code session in it.
+Then open **http://127.0.0.1:5173**.
 
 ## Run (production build)
 
@@ -41,6 +42,45 @@ npm start
 
 Then open **http://127.0.0.1:3001**. Same app, single process, no dev tooling.
 
+## Using it
+
+- **＋ New session** — start a terminal in a local folder (browse or pick a
+  recent one), in a GitHub repo (cloned via `gh` into
+  `~\multiclaude-workspaces\`), or as a blank shell. Optionally auto-start
+  `claude` (on by default) and/or run it in a git worktree so parallel
+  sessions on the same repo don't collide.
+- **Tabs and splits** — drag a tab to any edge to split the window; drag the
+  dividers to resize. The Single / 2-up / 2×2 buttons rearrange everything
+  into a preset grid. The layout is saved automatically and comes back after
+  a browser refresh or restart.
+- **Closing a tab** asks whether to kill the session or keep it running in
+  the background. Background sessions are listed under **Sessions**, where
+  you can reattach or kill them.
+- **Tab titles** show the folder name and current git branch, refreshed
+  automatically. Double-click a tab to rename it yourself (auto-renaming
+  then leaves it alone). A green dot appears on a tab when a background
+  session produces output — that's how you notice a Claude run finished.
+- **Images**: paste a screenshot (Ctrl+V) or drop an image file onto a
+  terminal. It's saved locally and the file path is typed into the terminal,
+  which is how Claude Code reads images. Saved images are pruned after 7 days.
+- **Copy/paste**: selecting text copies it automatically; Ctrl+V pastes
+  (multi-line pastes are bracketed, so they don't run line by line).
+- **Search**: Ctrl+Shift+F searches the visible terminal's scrollback.
+- **Health** shows the server PID/uptime and every session's PID, folder and
+  uptime. **Settings** has font size and scrollback length.
+
+Keyboard shortcuts: `Ctrl+Shift+F` search, `Ctrl+Shift+C` copy selection,
+`Ctrl+Shift+T` new session, `Ctrl+Tab` cycle panes. (Some browsers reserve
+`Ctrl+Tab`/`Ctrl+Shift+T` for themselves and won't pass them to the page.)
+
+## Where things live
+
+| What | Where |
+|---|---|
+| Layout, settings, recent folders | `%LOCALAPPDATA%\multiclaude\state.json` |
+| Pasted images | `%LOCALAPPDATA%\multiclaude\images\` (pruned after 7 days) |
+| Cloned GitHub repos | `%USERPROFILE%\multiclaude-workspaces\` (override with `MULTICLAUDE_WORKSPACES`) |
+
 ## How it works (one paragraph)
 
 A Node server spawns PowerShell through ConPTY (the same Windows plumbing VS
@@ -48,6 +88,7 @@ Code's terminal uses) via `node-pty`. Your browser opens one WebSocket per
 terminal pane: keystrokes go down, screen output comes up, and resize events
 tell the shell its real window size. The server keeps ~500 KB of recent output
 per session in memory, so a reconnecting browser can replay what it missed.
+Sessions belong to the server, not the browser — the browser is a viewer.
 
 ## Troubleshooting
 
@@ -57,11 +98,15 @@ the Visual Studio Build Tools. Fix: install them with
 `winget install Microsoft.VisualStudio.2022.BuildTools` (select the
 "Desktop development with C++" workload), then run `npm install` again.
 
-**Browser says "Connection lost — reconnecting…" forever.** The server isn't
-running. Start it with `npm run dev` (or `npm start` for the production build).
+**Browser says "This site can't be reached".** The server isn't running.
+Start it with `npm run dev` (or `npm start` for the production build) and
+leave that window open — the app only exists while it runs.
 
-**Terminal looks garbled after resizing.** Refresh the page — the server
-replays the session output at the new size.
+**"Connection lost — reconnecting…" in a pane.** The server stopped or
+restarted. When it's back, panes reattach automatically and replay output.
+
+**GitHub tab says gh isn't installed / signed in.** `winget install GitHub.cli`
+then `gh auth login`.
 
 **Port already in use.** Set a different port:
 `$env:MULTICLAUDE_PORT = "3002"; npm start` (and in dev, update the proxy
@@ -72,8 +117,8 @@ target in `vite.config.ts` to match).
 With the server running:
 
 ```
-node scripts/e2e-test.mjs
+node scripts/e2e-test.mjs        # terminal I/O + scrollback replay over WebSocket
+node scripts/api-test.mjs        # session create/list/kill, state persistence
+node scripts/launcher-test.mjs   # folder browser validation, gh integration
+node scripts/images-test.mjs     # image upload endpoint
 ```
-
-This attaches over WebSocket, runs a command in the shell, checks the output
-comes back, then reattaches to verify scrollback replay.

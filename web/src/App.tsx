@@ -9,11 +9,14 @@ import {
   type IJsonModel,
   type IJsonTabNode,
   type ILayoutApi,
+  type ITabRenderValues,
 } from "flexlayout-react";
 import { api, AppSettings, AppState, SessionInfo } from "./api";
 import TerminalPane from "./TerminalPane";
 import SessionListModal from "./SessionListModal";
 import NewSessionDialog from "./NewSessionDialog";
+import SettingsModal from "./SettingsModal";
+import HealthModal from "./HealthModal";
 import { Button, Modal, ToolbarButton } from "./components";
 
 const GLOBAL_LAYOUT_OPTS = {
@@ -45,6 +48,12 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [showSessions, setShowSessions] = useState(false);
   const [showNew, setShowNew] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [showHealth, setShowHealth] = useState(false);
+  const [dots, setDots] = useState<Record<string, boolean>>({});
+  const lastSeenRef = useRef<Record<string, number>>({});
+  const autoTitleRef = useRef<Record<string, string>>({});
+  const loadTimeRef = useRef(Date.now());
   const [confirmClose, setConfirmClose] = useState<{
     tabId: string;
     sessionId: string;
@@ -224,6 +233,61 @@ export default function App() {
     [model, collectTerminalTabs]
   );
 
+  // ------------------------------------- title refresh + activity indicators
+  useEffect(() => {
+    if (!model) return;
+    const tick = async () => {
+      let list: SessionInfo[];
+      try {
+        list = await api<SessionInfo[]>("/api/sessions");
+      } catch {
+        return; // server briefly down — try again next tick
+      }
+      const byId = new Map(list.map((s) => [s.id, s]));
+      const newDots: Record<string, boolean> = {};
+      collectTerminalTabs().forEach((tab) => {
+        const sid = (tab.getConfig() as { sessionId: string })?.sessionId;
+        const s = sid ? byId.get(sid) : undefined;
+        if (!s) return;
+
+        if (tab.isVisible()) {
+          // Seen right now — no dot.
+          lastSeenRef.current[sid] = Date.now();
+        } else if (s.lastOutputAt > (lastSeenRef.current[sid] ?? loadTimeRef.current)) {
+          // Background session produced output since we last looked at it.
+          newDots[sid] = true;
+        }
+
+        // Keep tab titles in sync with folder + git branch, but never clobber
+        // a name the user typed themselves (rename via double-click).
+        autoTitleRef.current[sid] ??= tab.getName();
+        if (tab.getName() === autoTitleRef.current[sid] && s.title !== tab.getName()) {
+          model.doAction(Actions.renameTab(tab.getId(), s.title));
+          autoTitleRef.current[sid] = s.title;
+        }
+      });
+      setDots(newDots);
+    };
+    void tick();
+    const t = setInterval(tick, 5000);
+    return () => clearInterval(t);
+  }, [model, collectTerminalTabs]);
+
+  const onRenderTab = useCallback(
+    (tabNode: TabNode, rv: ITabRenderValues) => {
+      const sid = (tabNode.getConfig() as { sessionId?: string })?.sessionId;
+      if (sid && dots[sid]) {
+        rv.leading = (
+          <span
+            className="inline-block h-2 w-2 rounded-full bg-emerald-400"
+            title="New output since you last looked"
+          />
+        );
+      }
+    },
+    [dots]
+  );
+
   // ------------------------------------------------------ keyboard shortcuts
   const cycleTab = useCallback(
     (dir: 1 | -1) => {
@@ -314,6 +378,14 @@ export default function App() {
         <ToolbarButton onClick={() => void applyPreset(4)} title="Four panes in a grid">
           2×2
         </ToolbarButton>
+        <div className="ml-auto flex items-center gap-1">
+          <ToolbarButton onClick={() => setShowHealth(true)} title="Server and session health">
+            Health
+          </ToolbarButton>
+          <ToolbarButton onClick={() => setShowSettings(true)} title="Font size and scrollback">
+            Settings
+          </ToolbarButton>
+        </div>
       </div>
 
       <div className="relative min-h-0 flex-1">
@@ -322,7 +394,19 @@ export default function App() {
           model={model}
           factory={factory}
           onAction={onAction}
-          onModelChange={persistLayout}
+          onRenderTab={onRenderTab}
+          onModelChange={(m, action) => {
+            if (action.type === Actions.SELECT_TAB) {
+              // Selecting a tab counts as "seen" — clear its dot immediately.
+              const node = m.getNodeById(action.data.node as string) as TabNode | undefined;
+              const sid = (node?.getConfig() as { sessionId?: string })?.sessionId;
+              if (sid) {
+                lastSeenRef.current[sid] = Date.now();
+                setDots((d) => (d[sid] ? { ...d, [sid]: false } : d));
+              }
+            }
+            persistLayout(m);
+          }}
         />
       </div>
 
@@ -341,6 +425,21 @@ export default function App() {
           onClose={() => setShowSessions(false)}
         />
       )}
+
+      {showSettings && (
+        <SettingsModal
+          settings={settings}
+          onClose={() => setShowSettings(false)}
+          onSave={(s) => {
+            setSettings(s);
+            api("/api/state", { method: "PUT", body: { settings: s } }).catch((e) =>
+              setError((e as Error).message)
+            );
+          }}
+        />
+      )}
+
+      {showHealth && <HealthModal onClose={() => setShowHealth(false)} />}
 
       {confirmClose && (
         <Modal title={`Close "${confirmClose.name}"`} onClose={() => setConfirmClose(null)}>
