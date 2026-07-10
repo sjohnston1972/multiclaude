@@ -5,6 +5,7 @@ import path from "node:path";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { SessionManager } from "./sessionManager.js";
+import { readState, writeState, rememberFolder } from "./stateStore.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -36,7 +37,7 @@ if (!LOOPBACK_HOSTS.has(HOST)) {
 }
 
 const sessions = new SessionManager();
-const app = Fastify({ logger: false });
+const app = Fastify({ logger: false, bodyLimit: 25 * 1024 * 1024 });
 
 // In production (`npm run build` then `npm start`) the server also serves the
 // built web UI. In dev, Vite serves the UI on :5173 and proxies to us instead.
@@ -45,16 +46,91 @@ if (fs.existsSync(webDist)) {
   app.register(fastifyStatic, { root: webDist });
 }
 
+// ---------------------------------------------------------------------------
+// REST API: sessions
+// ---------------------------------------------------------------------------
+
 app.get("/api/health", async () => ({
   ok: true,
   shell: sessions.shellFriendly,
-  sessions: sessions.list().map((s) => ({
-    id: s.id,
-    pid: s.pty.pid,
-    cwd: s.cwd,
-    createdAt: s.createdAt,
-  })),
+  pid: process.pid,
+  uptimeSeconds: Math.round(process.uptime()),
+  sessions: sessions.list(),
 }));
+
+app.get("/api/sessions", async () => sessions.list());
+
+app.post("/api/sessions", async (req, reply) => {
+  const body = (req.body ?? {}) as { cwd?: string };
+  let cwd: string | undefined;
+  if (body.cwd) {
+    const resolved = path.resolve(body.cwd);
+    if (!fs.existsSync(resolved) || !fs.statSync(resolved).isDirectory()) {
+      reply.code(400);
+      return { error: `Folder doesn't exist: ${resolved}` };
+    }
+    cwd = resolved;
+    rememberFolder(resolved);
+  }
+  try {
+    const session = sessions.create({ cwd });
+    return sessions.info(session);
+  } catch (err) {
+    reply.code(500);
+    return { error: `Couldn't start ${sessions.shellFriendly}: ${(err as Error).message}` };
+  }
+});
+
+// Used on reattach: if the server restarted and the pty is gone, respawn a
+// shell with the same id in the same folder the tab remembers.
+app.post("/api/sessions/:id/ensure", async (req, reply) => {
+  const { id } = req.params as { id: string };
+  const body = (req.body ?? {}) as { cwd?: string };
+  if (!/^[A-Za-z0-9_-]{1,64}$/.test(id)) {
+    reply.code(400);
+    return { error: "Invalid session id" };
+  }
+  const cwd = body.cwd && fs.existsSync(body.cwd) ? body.cwd : undefined;
+  try {
+    const { session, created } = sessions.ensure(id, cwd);
+    return { ...sessions.info(session), created };
+  } catch (err) {
+    reply.code(500);
+    return { error: `Couldn't start ${sessions.shellFriendly}: ${(err as Error).message}` };
+  }
+});
+
+app.delete("/api/sessions/:id", async (req, reply) => {
+  const { id } = req.params as { id: string };
+  const found = sessions.kill(id);
+  if (!found) reply.code(404);
+  return { ok: found };
+});
+
+// ---------------------------------------------------------------------------
+// REST API: persisted state (layout, settings, recent folders)
+// ---------------------------------------------------------------------------
+
+app.get("/api/state", async () => readState());
+
+app.put("/api/state", async (req) => {
+  const body = (req.body ?? {}) as {
+    layout?: unknown;
+    settings?: { fontSize?: number; scrollback?: number };
+  };
+  const state = readState();
+  if (body.layout !== undefined) state.layout = body.layout;
+  if (body.settings) {
+    if (typeof body.settings.fontSize === "number") {
+      state.settings.fontSize = Math.min(32, Math.max(8, body.settings.fontSize));
+    }
+    if (typeof body.settings.scrollback === "number") {
+      state.settings.scrollback = Math.min(200_000, Math.max(200, body.settings.scrollback));
+    }
+  }
+  writeState(state);
+  return { ok: true };
+});
 
 // ---------------------------------------------------------------------------
 // WebSocket: one connection per attached terminal pane.
@@ -66,7 +142,7 @@ const wss = new WebSocketServer({ noServer: true });
 wss.on("connection", (ws: WebSocket, sessionId: string) => {
   let session;
   try {
-    session = sessions.ensure(sessionId);
+    session = sessions.ensure(sessionId).session;
   } catch (err) {
     ws.send(
       JSON.stringify({

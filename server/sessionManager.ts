@@ -1,6 +1,8 @@
 import pty from "node-pty";
-import { execSync } from "node:child_process";
+import { execFile, execSync } from "node:child_process";
+import crypto from "node:crypto";
 import os from "node:os";
+import path from "node:path";
 
 /**
  * SessionManager owns the real PowerShell processes (via ConPTY).
@@ -11,6 +13,8 @@ import os from "node:os";
  */
 
 const SCROLLBACK_LIMIT = 500_000; // ~500 KB of recent output per session
+const KILL_GRACE_MS = 700; // Ctrl-C first, hard kill after this
+const BRANCH_REFRESH_MS = 30_000;
 
 export interface Session {
   id: string;
@@ -18,12 +22,33 @@ export interface Session {
   shell: string;
   cwd: string;
   createdAt: number;
+  title: string;
+  branch: string | null;
+  lastOutputAt: number;
   /** Ring buffer of recent output chunks; total length capped at SCROLLBACK_LIMIT. */
   scrollback: string[];
   scrollbackLength: number;
   listeners: Set<(data: string) => void>;
   exitListeners: Set<(code: number) => void>;
   exited: boolean;
+}
+
+export interface SessionInfo {
+  id: string;
+  title: string;
+  branch: string | null;
+  cwd: string;
+  pid: number;
+  createdAt: number;
+  lastOutputAt: number;
+  attached: boolean;
+}
+
+export interface CreateOptions {
+  id?: string;
+  cwd?: string;
+  /** Typed into the shell shortly after it starts (e.g. "claude"). */
+  initialCommand?: string;
 }
 
 /** Detect the best available shell once at startup: PowerShell 7 if installed, else Windows PowerShell. */
@@ -45,22 +70,37 @@ export class SessionManager {
     const detected = detectShell();
     this.shell = detected.shell;
     this.shellFriendly = detected.friendly;
+
+    // Keep session titles' git branch fresh (cheap: one git call per session).
+    const timer = setInterval(() => this.refreshBranches(), BRANCH_REFRESH_MS);
+    timer.unref();
   }
 
   get(id: string): Session | undefined {
     return this.sessions.get(id);
   }
 
-  list(): Session[] {
-    return [...this.sessions.values()];
+  list(): SessionInfo[] {
+    return [...this.sessions.values()].map((s) => this.info(s));
   }
 
-  /** Return the existing session or spawn a new shell for this id. */
-  ensure(id: string, cwd?: string): Session {
-    const existing = this.sessions.get(id);
-    if (existing && !existing.exited) return existing;
+  info(s: Session): SessionInfo {
+    return {
+      id: s.id,
+      title: s.branch ? `${s.title} (${s.branch})` : s.title,
+      branch: s.branch,
+      cwd: s.cwd,
+      pid: s.pty.pid,
+      createdAt: s.createdAt,
+      lastOutputAt: s.lastOutputAt,
+      attached: s.listeners.size > 0,
+    };
+  }
 
-    const workingDir = cwd ?? os.homedir();
+  create(opts: CreateOptions = {}): Session {
+    const id = opts.id ?? crypto.randomUUID().slice(0, 8);
+    const workingDir = opts.cwd ?? os.homedir();
+
     const proc = pty.spawn(this.shell, [], {
       name: "xterm-256color",
       cols: 120,
@@ -75,6 +115,9 @@ export class SessionManager {
       shell: this.shell,
       cwd: workingDir,
       createdAt: Date.now(),
+      title: path.basename(workingDir) || workingDir,
+      branch: null,
+      lastOutputAt: Date.now(),
       scrollback: [],
       scrollbackLength: 0,
       listeners: new Set(),
@@ -83,6 +126,7 @@ export class SessionManager {
     };
 
     proc.onData((data) => {
+      session.lastOutputAt = Date.now();
       // Append to the ring buffer, trimming oldest chunks past the cap.
       session.scrollback.push(data);
       session.scrollbackLength += data.length;
@@ -99,8 +143,25 @@ export class SessionManager {
       this.sessions.delete(id);
     });
 
+    if (opts.initialCommand) {
+      // Give the shell a moment to finish printing its startup banner/prompt
+      // before typing the command, exactly as a human would.
+      const cmd = opts.initialCommand;
+      setTimeout(() => {
+        if (!session.exited) proc.write(`${cmd}\r`);
+      }, 1500);
+    }
+
     this.sessions.set(id, session);
+    this.refreshBranch(session);
     return session;
+  }
+
+  /** Return the existing session or spawn a new shell with this id (used on reattach after a server restart). */
+  ensure(id: string, cwd?: string): { session: Session; created: boolean } {
+    const existing = this.sessions.get(id);
+    if (existing && !existing.exited) return { session: existing, created: false };
+    return { session: this.create({ id, cwd }), created: true };
   }
 
   write(id: string, data: string): void {
@@ -138,6 +199,25 @@ export class SessionManager {
     };
   }
 
+  /** Graceful kill: Ctrl-C first (lets claude/git clean up), hard kill shortly after. */
+  kill(id: string): boolean {
+    const s = this.sessions.get(id);
+    if (!s) return false;
+    try {
+      s.pty.write("\x03");
+    } catch {
+      // already gone
+    }
+    setTimeout(() => {
+      try {
+        if (!s.exited) s.pty.kill();
+      } catch {
+        // already gone
+      }
+    }, KILL_GRACE_MS).unref();
+    return true;
+  }
+
   /** Kill every session — used on server shutdown. */
   killAll(): void {
     for (const s of this.sessions.values()) {
@@ -148,5 +228,21 @@ export class SessionManager {
       }
     }
     this.sessions.clear();
+  }
+
+  private refreshBranches(): void {
+    for (const s of this.sessions.values()) this.refreshBranch(s);
+  }
+
+  private refreshBranch(s: Session): void {
+    execFile(
+      "git",
+      ["-C", s.cwd, "branch", "--show-current"],
+      { timeout: 5000, windowsHide: true },
+      (err, stdout) => {
+        if (s.exited) return;
+        s.branch = err ? null : stdout.trim() || null;
+      }
+    );
   }
 }
