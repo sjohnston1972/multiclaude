@@ -62,7 +62,10 @@ run the production version yourself: `npm run build` then `npm start`
 - **＋ New session** — start a terminal in a local folder (browse or pick a
   recent one), in a GitHub repo (cloned via `gh` into
   `~\multiclaude-workspaces\`), or as a blank shell. In the folder browser you
-  can also type or paste a path directly and press Enter. Options: auto-start
+  can also type or paste a path directly and press Enter, or **create a new
+  folder** on the spot and open a session in it. On the GitHub tab you can
+  **create a brand-new repo** (pick private/public each time; it's initialised
+  with a README, cloned into your workspace, and opened). Options: auto-start
   `claude` (on by default), skip its permission prompts
   (`--dangerously-skip-permissions`, on by default), and/or run it in a git
   worktree so parallel sessions on the same repo don't collide.
@@ -145,4 +148,5 @@ node scripts/launcher-test.mjs   # folder browser validation, gh integration
 node scripts/images-test.mjs     # image upload endpoint
 node scripts/security-test.mjs   # cross-origin defence (REST + WebSocket)
 node scripts/features-test.mjs   # broadcast, reveal, bell field, auto-claude timing
+node scripts/create-test.mjs     # create-folder + create-repo validation
 ```

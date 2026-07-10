@@ -49,6 +49,14 @@ export default function NewSessionDialog({
   const [useWorktree, setUseWorktree] = useState(false);
   const [worktreeName, setWorktreeName] = useState("");
 
+  // "Create new folder" (folder tab) and "Create new repo" (github tab)
+  const [newFolderName, setNewFolderName] = useState("");
+  const [showNewFolder, setShowNewFolder] = useState(false);
+  const [showCreateRepo, setShowCreateRepo] = useState(false);
+  const [repoName, setRepoName] = useState("");
+  const [repoVisibility, setRepoVisibility] = useState<"private" | "public" | null>(null);
+  const [repoDesc, setRepoDesc] = useState("");
+
   const loadBrowse = (path?: string) => {
     setError(null);
     api<BrowseResult>(`/api/browse${path ? `?path=${encodeURIComponent(path)}` : ""}`)
@@ -82,6 +90,37 @@ export default function NewSessionDialog({
       });
       onCreated(s);
       onClose();
+    } catch (e) {
+      setError((e as Error).message);
+      setBusy(null);
+    }
+  };
+
+  const createFolderAndOpen = async () => {
+    if (!browse?.path) return;
+    setBusy("Creating folder…");
+    setError(null);
+    try {
+      const r = await api<{ path: string }>("/api/mkdir", {
+        method: "POST",
+        body: { parent: browse.path, name: newFolderName.trim() },
+      });
+      await createSession(r.path);
+    } catch (e) {
+      setError((e as Error).message);
+      setBusy(null);
+    }
+  };
+
+  const createRepoAndOpen = async () => {
+    setBusy(`Creating ${repoName.trim()} on GitHub…`);
+    setError(null);
+    try {
+      const r = await api<{ path: string }>("/api/github/create", {
+        method: "POST",
+        body: { name: repoName.trim(), visibility: repoVisibility, description: repoDesc.trim() },
+      });
+      await createSession(r.path);
     } catch (e) {
       setError((e as Error).message);
       setBusy(null);
@@ -203,6 +242,43 @@ export default function NewSessionDialog({
                   ))
                 )}
               </div>
+              {/* Create a new subfolder here, then open a session in it. */}
+              {showNewFolder ? (
+                <div className="mb-2 flex items-center gap-2 rounded border border-neutral-700 bg-neutral-800/50 p-2">
+                  <input
+                    autoFocus
+                    type="text"
+                    value={newFolderName}
+                    onChange={(e) => setNewFolderName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && newFolderName.trim()) void createFolderAndOpen();
+                      else if (e.key === "Escape") setShowNewFolder(false);
+                    }}
+                    placeholder="New folder name"
+                    spellCheck={false}
+                    className="min-w-0 flex-1 rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-sm outline-none focus:border-blue-600"
+                  />
+                  <Button
+                    kind="primary"
+                    onClick={() => void createFolderAndOpen()}
+                    disabled={!!busy || !newFolderName.trim()}
+                  >
+                    Create &amp; open
+                  </Button>
+                  <Button onClick={() => setShowNewFolder(false)}>Cancel</Button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => {
+                    setNewFolderName("");
+                    setShowNewFolder(true);
+                  }}
+                  className="mb-2 text-sm text-neutral-400 hover:text-neutral-200"
+                >
+                  ＋ New folder here
+                </button>
+              )}
+
               <div className="flex items-center justify-between gap-2">
                 <span className="truncate text-xs text-neutral-500" title={browse.path}>
                   {browse.path}
@@ -223,6 +299,76 @@ export default function NewSessionDialog({
 
       {mode === "github" && (
         <div>
+          {/* Create a brand-new repo on GitHub, then clone + open it. */}
+          <div className="mb-3 rounded border border-neutral-700 bg-neutral-800/50 p-2">
+            {showCreateRepo ? (
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center gap-2">
+                  <input
+                    autoFocus
+                    type="text"
+                    value={repoName}
+                    onChange={(e) => setRepoName(e.target.value)}
+                    placeholder="new-repo-name"
+                    spellCheck={false}
+                    className="min-w-0 flex-1 rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-sm outline-none focus:border-blue-600"
+                  />
+                  <label className="flex items-center gap-1 text-sm">
+                    <input
+                      type="radio"
+                      name="repo-vis"
+                      checked={repoVisibility === "private"}
+                      onChange={() => setRepoVisibility("private")}
+                    />
+                    Private
+                  </label>
+                  <label className="flex items-center gap-1 text-sm">
+                    <input
+                      type="radio"
+                      name="repo-vis"
+                      checked={repoVisibility === "public"}
+                      onChange={() => setRepoVisibility("public")}
+                    />
+                    Public
+                  </label>
+                </div>
+                <input
+                  type="text"
+                  value={repoDesc}
+                  onChange={(e) => setRepoDesc(e.target.value)}
+                  placeholder="Description (optional)"
+                  className="rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-sm outline-none focus:border-blue-600"
+                />
+                <div className="flex items-center gap-2">
+                  <Button
+                    kind="primary"
+                    onClick={() => void createRepoAndOpen()}
+                    disabled={!!busy || !repoName.trim() || repoVisibility === null}
+                    title={repoVisibility === null ? "Choose Private or Public first" : undefined}
+                  >
+                    Create &amp; open
+                  </Button>
+                  <Button onClick={() => setShowCreateRepo(false)}>Cancel</Button>
+                  <span className="text-xs text-neutral-500">
+                    Initialised with a README, cloned into your workspace.
+                  </span>
+                </div>
+              </div>
+            ) : (
+              <button
+                onClick={() => {
+                  setRepoName("");
+                  setRepoDesc("");
+                  setRepoVisibility(null);
+                  setShowCreateRepo(true);
+                }}
+                className="text-sm text-neutral-300 hover:text-white"
+              >
+                ＋ Create a new repo on GitHub
+              </button>
+            )}
+          </div>
+
           {ghError ? (
             <p className="rounded bg-amber-950 px-3 py-2 text-amber-300">{ghError}</p>
           ) : repos === null ? (

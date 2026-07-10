@@ -89,6 +89,93 @@ export function registerLauncherRoutes(app: FastifyInstance): void {
     };
   });
 
+  // ------------------------------------------------------- create a subfolder
+  app.post("/api/mkdir", async (req, reply) => {
+    const body = (req.body ?? {}) as { parent?: string; name?: string };
+    const parent = body.parent ? validateDirPath(body.parent) : null;
+    if (!parent) {
+      reply.code(400);
+      return { error: "That parent folder can't be written to" };
+    }
+    const name = (body.name ?? "").trim();
+    // A single folder name — no path separators, drive letters or traversal.
+    if (!/^[A-Za-z0-9 ._-]{1,80}$/.test(name) || name === "." || name === "..") {
+      reply.code(400);
+      return { error: "Folder name may only use letters, numbers, spaces, dots, dashes" };
+    }
+    const target = path.join(parent, name);
+    if (fs.existsSync(target)) {
+      reply.code(409);
+      return { error: `A folder named "${name}" already exists here` };
+    }
+    try {
+      fs.mkdirSync(target);
+      return { path: target };
+    } catch (err) {
+      reply.code(500);
+      return { error: `Couldn't create the folder: ${(err as Error).message}` };
+    }
+  });
+
+  // -------------------------------------------------- create a new GitHub repo
+  app.post("/api/github/create", async (req, reply) => {
+    const body = (req.body ?? {}) as {
+      name?: string;
+      visibility?: string;
+      description?: string;
+    };
+    const name = (body.name ?? "").trim();
+    if (!/^[A-Za-z0-9._-]{1,100}$/.test(name)) {
+      reply.code(400);
+      return { error: "Repo name may only use letters, numbers, dots, dashes, underscores" };
+    }
+    if (body.visibility !== "public" && body.visibility !== "private") {
+      reply.code(400);
+      return { error: "Choose whether the repo is public or private" };
+    }
+    const target = path.join(workspaceRoot, name);
+    if (fs.existsSync(target)) {
+      reply.code(409);
+      return { error: `A folder named "${name}" already exists in your workspace` };
+    }
+
+    fs.mkdirSync(workspaceRoot, { recursive: true });
+    const args = [
+      "repo",
+      "create",
+      name,
+      body.visibility === "public" ? "--public" : "--private",
+      "--add-readme", // gives the repo a first commit so it's usable immediately
+      "--clone",
+    ];
+    const description = (body.description ?? "").trim();
+    if (description) args.push("--description", description);
+
+    try {
+      // --clone drops the repo into <cwd>/<name>, so run from the workspace root.
+      await execFileAsync("gh", args, {
+        cwd: workspaceRoot,
+        timeout: 120_000,
+        windowsHide: true,
+      });
+      return { path: target };
+    } catch (err) {
+      const e = err as NodeJS.ErrnoException & { stderr?: string };
+      reply.code(500);
+      if (e.code === "ENOENT") {
+        return { error: "GitHub CLI (gh) isn't installed. Install it from https://cli.github.com." };
+      }
+      const stderr = (e.stderr ?? "").trim();
+      if (/already exists/i.test(stderr)) {
+        return { error: `A repo named "${name}" already exists on your GitHub account.` };
+      }
+      if (/auth|not logged in/i.test(stderr)) {
+        return { error: "GitHub CLI isn't signed in. Run 'gh auth login', then try again." };
+      }
+      return { error: `Couldn't create the repo: ${stderr || e.message}` };
+    }
+  });
+
   // -------------------------------------------------- reveal folder in Explorer
   app.post("/api/reveal", async (req, reply) => {
     const body = (req.body ?? {}) as { path?: string };
