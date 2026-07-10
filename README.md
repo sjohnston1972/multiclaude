@@ -122,9 +122,17 @@ run the production version yourself: `npm run build` then `npm start`
 - **Health** shows the server PID/uptime and every session's PID, folder and
   uptime. **Settings** has font size and scrollback length.
 
-Keyboard shortcuts: `Ctrl+Shift+F` search, `Ctrl+Shift+C` copy selection,
-`Ctrl+Shift+T` new session, `Ctrl+Tab` cycle panes. (Some browsers reserve
-`Ctrl+Tab`/`Ctrl+Shift+T` for themselves and won't pass them to the page.)
+- **Command palette (`Ctrl+K`).** A fuzzy quick-switcher: start typing to jump
+  to any session by name or folder, reattach a background session, or run any
+  action (new session, broadcast, layouts, health, settings, kill all). Arrow
+  keys to move, Enter to run, Esc to close. Built for when you have a lot of
+  panes and don't want to hunt for the right tab. There's also a **Search**
+  button in the toolbar.
+
+Keyboard shortcuts: `Ctrl+K` command palette, `Ctrl+Shift+F` search,
+`Ctrl+Shift+C` copy selection, `Ctrl+Shift+T` new session, `Ctrl+Tab` cycle
+panes. (Some browsers reserve `Ctrl+Tab`/`Ctrl+Shift+T` for themselves and
+won't pass them to the page.)
 
 ## Where things live
 

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Actions,
   DockLocation,
@@ -25,6 +25,7 @@ import SettingsModal from "./SettingsModal";
 import HealthModal from "./HealthModal";
 import BroadcastModal from "./BroadcastModal";
 import RestoreModal, { type RestorableSpec } from "./RestoreModal";
+import CommandPalette, { type Command } from "./CommandPalette";
 import { updateFavicon } from "./favicon";
 import { notify } from "./notifications";
 import { Button, Modal, ToolbarButton } from "./components";
@@ -38,6 +39,8 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [showHealth, setShowHealth] = useState(false);
   const [showBroadcast, setShowBroadcast] = useState(false);
+  const [showPalette, setShowPalette] = useState(false);
+  const [liveSessions, setLiveSessions] = useState<SessionInfo[]>([]);
   const [dots, setDots] = useState<Record<string, boolean>>({});
   const lastSeenRef = useRef<Record<string, number>>({});
   const autoTitleRef = useRef<Record<string, string>>({});
@@ -305,6 +308,7 @@ export default function App() {
       } catch {
         return; // server briefly down — try again next tick
       }
+      setLiveSessions(list);
       const byId = new Map(list.map((s) => [s.id, s]));
       const newDots: Record<string, boolean> = {};
       collectTerminalTabs().forEach((tab) => {
@@ -379,6 +383,17 @@ export default function App() {
   const attentionIds = new Set(Object.keys(dots).filter((id) => dots[id]));
 
   // ------------------------------------------------------ keyboard shortcuts
+  const selectTab = useCallback(
+    (tabId: string) => {
+      if (!model) return;
+      const node = model.getNodeById(tabId) as TabNode | undefined;
+      model.doAction(Actions.selectTab(tabId));
+      const parent = node?.getParent();
+      if (parent) model.doAction(Actions.setActiveTabset(parent.getId()));
+    },
+    [model]
+  );
+
   const cycleTab = useCallback(
     (dir: 1 | -1) => {
       if (!model) return;
@@ -386,19 +401,69 @@ export default function App() {
       if (tabs.length < 2) return;
       const active = model.getActiveTabset()?.getSelectedNode() as TabNode | undefined;
       const idx = active ? tabs.findIndex((t) => t.getId() === active.getId()) : -1;
-      const next = tabs[(idx + dir + tabs.length) % tabs.length];
-      model.doAction(Actions.selectTab(next.getId()));
-      const parent = next.getParent();
-      if (parent) model.doAction(Actions.setActiveTabset(parent.getId()));
+      selectTab(tabs[(idx + dir + tabs.length) % tabs.length].getId());
     },
-    [model, collectTerminalTabs]
+    [model, collectTerminalTabs, selectTab]
   );
+
+  // Full command list for the Ctrl-K palette: jump to any pane, reattach a
+  // background session, or run any action.
+  const paletteCommands = useMemo((): Command[] => {
+    const cmds: Command[] = [];
+    const tabs = collectTerminalTabs();
+    const shown = new Set(
+      tabs.map((t) => (t.getConfig() as { sessionId?: string })?.sessionId)
+    );
+    tabs.forEach((t) => {
+      const cfg = (t.getConfig() ?? {}) as { sessionId?: string; cwd?: string };
+      cmds.push({
+        id: `tab:${t.getId()}`,
+        title: `Go to ${t.getName()}`,
+        subtitle: cfg.cwd,
+        group: "Sessions",
+        run: () => selectTab(t.getId()),
+      });
+    });
+    liveSessions
+      .filter((s) => !shown.has(s.id))
+      .forEach((s) => {
+        cmds.push({
+          id: `bg:${s.id}`,
+          title: `Reattach ${s.title}`,
+          subtitle: s.cwd,
+          group: "Background sessions",
+          run: () => reattach(s),
+        });
+      });
+    cmds.push({ id: "a:new", title: "New session…", group: "Actions", run: () => setShowNew(true) });
+    cmds.push({ id: "a:bcast", title: "Broadcast to all…", group: "Actions", run: () => setShowBroadcast(true) });
+    cmds.push({ id: "a:sessions", title: "Sessions list…", group: "Actions", run: () => setShowSessions(true) });
+    cmds.push({ id: "a:health", title: "Health", group: "Actions", run: () => setShowHealth(true) });
+    cmds.push({ id: "a:settings", title: "Settings", group: "Actions", run: () => setShowSettings(true) });
+    cmds.push({ id: "l:1", title: "Layout: Single", group: "Layout", run: () => void applyPreset(1) });
+    cmds.push({ id: "l:2", title: "Layout: 2-up", group: "Layout", run: () => void applyPreset(2) });
+    cmds.push({ id: "l:4", title: "Layout: 2×2", group: "Layout", run: () => void applyPreset(4) });
+    cmds.push({ id: "l:9", title: "Layout: 3×3", group: "Layout", run: () => void applyPreset(9) });
+    cmds.push({
+      id: "d:killall",
+      title: "Kill all sessions",
+      group: "Danger",
+      danger: true,
+      run: () => void killAllFromList(),
+    });
+    return cmds;
+  }, [collectTerminalTabs, liveSessions, selectTab, reattach, applyPreset, killAllFromList]);
 
   useEffect(() => {
     // Note: some browsers reserve Ctrl+Tab / Ctrl+Shift+T for themselves and
     // never let a page see them — these work where the browser allows it.
     const onKey = (e: KeyboardEvent) => {
-      if (e.ctrlKey && e.shiftKey && e.code === "KeyT") {
+      if (e.ctrlKey && !e.shiftKey && !e.altKey && e.code === "KeyK") {
+        // Intercept before the terminal sees it, and toggle the palette.
+        e.preventDefault();
+        e.stopPropagation();
+        setShowPalette((p) => !p);
+      } else if (e.ctrlKey && e.shiftKey && e.code === "KeyT") {
         e.preventDefault();
         setShowNew(true);
       } else if (e.ctrlKey && e.code === "Tab") {
@@ -501,6 +566,14 @@ export default function App() {
           3×3
         </ToolbarButton>
         <div className="ml-auto flex items-center gap-1">
+          <button
+            onClick={() => setShowPalette(true)}
+            title="Command palette — jump to a session or run a command"
+            className="mr-1 flex items-center gap-1.5 rounded border border-neutral-700 px-2 py-1 text-xs text-neutral-400 hover:bg-neutral-700 hover:text-white"
+          >
+            <span>Search</span>
+            <kbd className="rounded bg-neutral-800 px-1 font-mono text-[10px] text-neutral-400">Ctrl K</kbd>
+          </button>
           <ToolbarButton onClick={() => setShowHealth(true)} title="Server and session health">
             Health
           </ToolbarButton>
@@ -567,6 +640,10 @@ export default function App() {
       {showHealth && <HealthModal onClose={() => setShowHealth(false)} />}
 
       {showBroadcast && <BroadcastModal onClose={() => setShowBroadcast(false)} />}
+
+      {showPalette && (
+        <CommandPalette commands={paletteCommands} onClose={() => setShowPalette(false)} />
+      )}
 
       {confirmClose && (
         <Modal title={`Close "${confirmClose.name}"`} onClose={() => setConfirmClose(null)}>
