@@ -17,6 +17,7 @@ import SessionListModal from "./SessionListModal";
 import NewSessionDialog from "./NewSessionDialog";
 import SettingsModal from "./SettingsModal";
 import HealthModal from "./HealthModal";
+import BroadcastModal from "./BroadcastModal";
 import { Button, Modal, ToolbarButton } from "./components";
 
 const GLOBAL_LAYOUT_OPTS = {
@@ -50,6 +51,7 @@ export default function App() {
   const [showNew, setShowNew] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showHealth, setShowHealth] = useState(false);
+  const [showBroadcast, setShowBroadcast] = useState(false);
   const [dots, setDots] = useState<Record<string, boolean>>({});
   const lastSeenRef = useRef<Record<string, number>>({});
   const autoTitleRef = useRef<Record<string, string>>({});
@@ -219,6 +221,22 @@ export default function App() {
     [addSessionTab]
   );
 
+  const duplicateFromList = useCallback(
+    async (s: SessionInfo) => {
+      try {
+        const dup = await api<SessionInfo>("/api/sessions", {
+          method: "POST",
+          body: { cwd: s.cwd },
+        });
+        addSessionTab(dup);
+        setShowSessions(false);
+      } catch (e) {
+        setError((e as Error).message);
+      }
+    },
+    [addSessionTab]
+  );
+
   const killFromList = useCallback(
     async (s: SessionInfo) => {
       try {
@@ -256,8 +274,9 @@ export default function App() {
         if (tab.isVisible()) {
           // Seen right now — no dot.
           lastSeenRef.current[sid] = Date.now();
-        } else if (s.lastOutputAt > (lastSeenRef.current[sid] ?? loadTimeRef.current)) {
-          // Background session produced output since we last looked at it.
+        } else if (s.lastBellAt > (lastSeenRef.current[sid] ?? loadTimeRef.current)) {
+          // Background session rang the terminal bell since we last looked —
+          // that's claude (or any CLI) asking for attention, e.g. "done".
           newDots[sid] = true;
         }
 
@@ -382,6 +401,12 @@ export default function App() {
         <ToolbarButton onClick={() => setShowSessions(true)} title="All live sessions">
           Sessions
         </ToolbarButton>
+        <ToolbarButton
+          onClick={() => setShowBroadcast(true)}
+          title="Send a command to every session at once"
+        >
+          Broadcast
+        </ToolbarButton>
         <div className="mx-2 h-5 w-px bg-neutral-700" />
         <span className="text-xs text-neutral-500">Layout:</span>
         <ToolbarButton onClick={() => void applyPreset(1)} title="Single pane">
@@ -441,6 +466,7 @@ export default function App() {
           onReattach={reattach}
           onKill={killFromList}
           onKillAll={killAllFromList}
+          onDuplicate={duplicateFromList}
           onClose={() => setShowSessions(false)}
         />
       )}
@@ -459,6 +485,8 @@ export default function App() {
       )}
 
       {showHealth && <HealthModal onClose={() => setShowHealth(false)} />}
+
+      {showBroadcast && <BroadcastModal onClose={() => setShowBroadcast(false)} />}
 
       {confirmClose && (
         <Modal title={`Close "${confirmClose.name}"`} onClose={() => setConfirmClose(null)}>

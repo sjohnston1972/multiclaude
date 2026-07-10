@@ -89,6 +89,19 @@ export function registerLauncherRoutes(app: FastifyInstance): void {
     };
   });
 
+  // -------------------------------------------------- reveal folder in Explorer
+  app.post("/api/reveal", async (req, reply) => {
+    const body = (req.body ?? {}) as { path?: string };
+    const resolved = body.path ? validateDirPath(body.path) : null;
+    if (!resolved) {
+      reply.code(400);
+      return { error: "Not a folder that can be opened" };
+    }
+    // explorer.exe returns exit code 1 even on success, so ignore the result.
+    execFile("explorer.exe", [resolved], { windowsHide: true }, () => {});
+    return { ok: true };
+  });
+
   // ------------------------------------------------------------ github repos
   app.get("/api/github/repos", async (_req, reply) => {
     try {

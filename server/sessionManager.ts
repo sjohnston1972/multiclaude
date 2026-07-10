@@ -25,6 +25,10 @@ export interface Session {
   title: string;
   branch: string | null;
   lastOutputAt: number;
+  /** When the shell last rang the terminal bell (\x07) — claude does this when it wants attention. */
+  lastBellAt: number;
+  /** One-shot hook fired on the first output chunk (used to time the initial command). */
+  onFirstOutput?: () => void;
   /** Ring buffer of recent output chunks; total length capped at SCROLLBACK_LIMIT. */
   scrollback: string[];
   scrollbackLength: number;
@@ -41,6 +45,7 @@ export interface SessionInfo {
   pid: number;
   createdAt: number;
   lastOutputAt: number;
+  lastBellAt: number;
   attached: boolean;
 }
 
@@ -118,6 +123,7 @@ export class SessionManager {
       pid: s.pty.pid,
       createdAt: s.createdAt,
       lastOutputAt: s.lastOutputAt,
+      lastBellAt: s.lastBellAt,
       attached: s.listeners.size > 0,
     };
   }
@@ -143,6 +149,7 @@ export class SessionManager {
       title: path.basename(workingDir) || workingDir,
       branch: null,
       lastOutputAt: Date.now(),
+      lastBellAt: 0,
       scrollback: [],
       scrollbackLength: 0,
       listeners: new Set(),
@@ -152,6 +159,12 @@ export class SessionManager {
 
     proc.onData((data) => {
       session.lastOutputAt = Date.now();
+      if (data.includes("\x07")) session.lastBellAt = Date.now();
+      if (session.onFirstOutput) {
+        const cb = session.onFirstOutput;
+        session.onFirstOutput = undefined;
+        cb();
+      }
       // Append to the ring buffer, trimming oldest chunks past the cap.
       session.scrollback.push(data);
       session.scrollbackLength += data.length;
@@ -169,12 +182,18 @@ export class SessionManager {
     });
 
     if (opts.initialCommand) {
-      // Give the shell a moment to finish printing its startup banner/prompt
-      // before typing the command, exactly as a human would.
+      // Type the command once the shell has printed its first output (the
+      // prompt is ready), after a short settle delay — more reliable than a
+      // fixed wait. A 3s deadline is the fallback if no output ever arrives.
       const cmd = opts.initialCommand;
-      setTimeout(() => {
-        if (!session.exited) proc.write(`${cmd}\r`);
-      }, 1500);
+      let typed = false;
+      const typeOnce = () => {
+        if (typed || session.exited) return;
+        typed = true;
+        proc.write(`${cmd}\r`);
+      };
+      session.onFirstOutput = () => setTimeout(typeOnce, 400);
+      setTimeout(typeOnce, 3000);
     }
 
     this.sessions.set(id, session);
@@ -192,6 +211,18 @@ export class SessionManager {
   write(id: string, data: string): void {
     const s = this.sessions.get(id);
     if (s && !s.exited) s.pty.write(data);
+  }
+
+  /** Write the same data to every live session (used by "broadcast to all"). */
+  writeAll(data: string): number {
+    let n = 0;
+    for (const s of this.sessions.values()) {
+      if (!s.exited) {
+        s.pty.write(data);
+        n++;
+      }
+    }
+    return n;
   }
 
   resize(id: string, cols: number, rows: number): void {
@@ -233,9 +264,13 @@ export class SessionManager {
     const s = this.sessions.get(id);
     if (!s) return Promise.resolve(false);
     return new Promise((resolve) => {
+      let done = false;
       const finish = () => {
+        if (done) return;
+        done = true;
         clearTimeout(hardKill);
         clearTimeout(bail);
+        s.exitListeners.delete(finish);
         resolve(true);
       };
       s.exitListeners.add(finish);
@@ -247,8 +282,16 @@ export class SessionManager {
       const hardKill = setTimeout(() => {
         if (!s.exited) killTree(s.pty.pid);
       }, KILL_GRACE_MS);
-      // Never leave the HTTP request hanging even if the exit event is lost.
-      const bail = setTimeout(finish, 3000);
+      // Safety net: if the process somehow never reports exit, make a final
+      // kill attempt and forget the session anyway, so the session list can't
+      // show a zombie that has really been killed.
+      const bail = setTimeout(() => {
+        if (!s.exited) {
+          killTree(s.pty.pid);
+          this.sessions.delete(id);
+        }
+        finish();
+      }, 3000);
     });
   }
 

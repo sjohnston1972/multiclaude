@@ -8,6 +8,7 @@ export interface SessionInfo {
   pid: number;
   createdAt: number;
   lastOutputAt: number;
+  lastBellAt: number;
   attached: boolean;
 }
 

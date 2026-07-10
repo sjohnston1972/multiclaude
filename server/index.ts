@@ -41,6 +41,37 @@ if (!LOOPBACK_HOSTS.has(HOST)) {
 const sessions = new SessionManager();
 const app = Fastify({ logger: false, bodyLimit: 25 * 1024 * 1024 });
 
+// ---------------------------------------------------------------------------
+// Cross-origin defence. Binding to loopback stops other machines, but NOT
+// other websites: a browser will happily open a cross-origin WebSocket, so a
+// malicious page you visit could otherwise connect to /ws and spawn a shell
+// on this machine. We therefore require the WS Origin to be one of our own
+// loopback origins (CLI tools send no Origin, which we allow), and the Host
+// header to be loopback (this also defeats DNS-rebinding attacks).
+const LOOPBACK_HOST_RE = /^(127\.0\.0\.1|localhost|\[?::1\]?)(:\d+)?$/i;
+
+function isAllowedWsRequest(req: { headers: Record<string, unknown> }): boolean {
+  const host = String(req.headers["host"] ?? "");
+  if (!LOOPBACK_HOST_RE.test(host)) return false;
+
+  const origin = req.headers["origin"];
+  if (origin === undefined) return true; // non-browser client (test scripts, curl)
+  try {
+    return LOOPBACK_HOST_RE.test(new URL(String(origin)).host);
+  } catch {
+    return false;
+  }
+}
+
+// Same cross-origin rule for the REST API (defence-in-depth: JSON bodies
+// already force a CORS preflight the browser blocks, but this also covers
+// any future endpoint and simple GETs).
+app.addHook("onRequest", async (req, reply) => {
+  if (!isAllowedWsRequest(req)) {
+    reply.code(403).send({ error: "Cross-origin request refused" });
+  }
+});
+
 // In production (`npm run build` then `npm start`) the server also serves the
 // built web UI. In dev, Vite serves the UI on :5173 and proxies to us instead.
 const webDist = path.resolve(__dirname, "../../web/dist");
@@ -125,6 +156,14 @@ app.post("/api/sessions/:id/ensure", async (req, reply) => {
   }
 });
 
+// Broadcast a command to every live session (types it and presses Enter).
+app.post("/api/broadcast", async (req) => {
+  const body = (req.body ?? {}) as { command?: string };
+  const command = typeof body.command === "string" ? body.command : "";
+  const count = sessions.writeAll(`${command}\r`);
+  return { ok: true, sent: count };
+});
+
 // Kill everything at once (all kills run in parallel, responds when done).
 app.delete("/api/sessions", async () => {
   const ids = sessions.list().map((s) => s.id);
@@ -148,6 +187,8 @@ app.delete("/api/sessions/:id", async (req, reply) => {
 registerLauncherRoutes(app);
 registerImageRoutes(app);
 pruneOldImages();
+// Prune again daily so a long-running (autostarted) server doesn't hoard images.
+setInterval(pruneOldImages, 24 * 60 * 60 * 1000).unref();
 
 app.get("/api/state", async () => readState());
 
@@ -240,6 +281,13 @@ async function main() {
   app.server.on("upgrade", (req, socket, head) => {
     const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
     if (url.pathname !== "/ws") {
+      socket.destroy();
+      return;
+    }
+    // Reject cross-origin / non-loopback WebSocket attempts before spawning
+    // anything — see isAllowedWsRequest above.
+    if (!isAllowedWsRequest(req)) {
+      socket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
       socket.destroy();
       return;
     }

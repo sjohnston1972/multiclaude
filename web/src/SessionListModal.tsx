@@ -11,17 +11,36 @@ export default function SessionListModal({
   onReattach,
   onKill,
   onKillAll,
+  onDuplicate,
   onClose,
 }: {
   openSessionIds: Set<string>;
   onReattach: (s: SessionInfo) => void;
   onKill: (s: SessionInfo) => Promise<void>;
   onKillAll: () => Promise<void>;
+  onDuplicate: (s: SessionInfo) => void;
   onClose: () => void;
 }) {
   const [sessions, setSessions] = useState<SessionInfo[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [confirmAll, setConfirmAll] = useState(false);
+  const [copied, setCopied] = useState<string | null>(null);
+
+  const copyPath = (s: SessionInfo) => {
+    navigator.clipboard.writeText(s.cwd).then(
+      () => {
+        setCopied(s.id);
+        setTimeout(() => setCopied((c) => (c === s.id ? null : c)), 1500);
+      },
+      () => setError("Couldn't copy to clipboard")
+    );
+  };
+
+  const revealFolder = (s: SessionInfo) => {
+    api("/api/reveal", { method: "POST", body: { path: s.cwd } }).catch((e) =>
+      setError(e.message)
+    );
+  };
 
   const refresh = () => {
     api<SessionInfo[]>("/api/sessions")
@@ -93,6 +112,15 @@ export default function SessionListModal({
                 </td>
                 <td className="py-2 text-right">
                   <span className="inline-flex gap-2">
+                    <Button onClick={() => copyPath(s)} title="Copy the folder path">
+                      {copied === s.id ? "Copied!" : "Copy path"}
+                    </Button>
+                    <Button onClick={() => revealFolder(s)} title="Open the folder in Explorer">
+                      Open folder
+                    </Button>
+                    <Button onClick={() => onDuplicate(s)} title="New session in the same folder">
+                      Duplicate
+                    </Button>
                     {!openSessionIds.has(s.id) && (
                       <Button kind="primary" onClick={() => onReattach(s)}>
                         Reattach

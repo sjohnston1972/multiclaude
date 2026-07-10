@@ -8,7 +8,9 @@ recent output, like plugging back into a console port.
 
 **Security note:** this app gives whoever connects a real shell on your
 machine. It listens on `127.0.0.1` only and refuses to start on any other
-address. Never expose it through a tunnel or reverse proxy.
+address. It also rejects any REST or WebSocket request whose browser origin
+isn't loopback, so a random website you visit can't reach in and spawn a
+shell through your browser. Never expose it through a tunnel or reverse proxy.
 
 ## Prerequisites
 
@@ -69,12 +71,17 @@ run the production version yourself: `npm run build` then `npm start`
   everything into a preset grid. The layout is saved automatically and comes back after
   a browser refresh or restart.
 - **Closing a tab** asks whether to kill the session or keep it running in
-  the background. Background sessions are listed under **Sessions**, where
-  you can reattach or kill them.
+  the background. Background sessions are listed under **Sessions**, where you
+  can reattach, kill, kill-all, **duplicate** (a new session in the same
+  folder), **open the folder** in Explorer, or **copy its path**.
+- **Broadcast** (toolbar) types one command, plus Enter, into every live
+  session at once — e.g. send the same instruction to every Claude, or run
+  `/clear` everywhere.
 - **Tab titles** show the folder name and current git branch, refreshed
   automatically. Double-click a tab to rename it yourself (auto-renaming
-  then leaves it alone). A green dot appears on a tab when a background
-  session produces output — that's how you notice a Claude run finished.
+  then leaves it alone). A green dot appears on a background tab when its
+  session rings the terminal bell — which is what Claude Code does when it
+  finishes and wants your attention.
 - **Images**: paste a screenshot (Ctrl+V) or drop an image file onto a
   terminal. It's saved locally and the file path is typed into the terminal,
   which is how Claude Code reads images. Saved images are pruned after 7 days.
@@ -136,4 +143,6 @@ node scripts/e2e-test.mjs        # terminal I/O + scrollback replay over WebSock
 node scripts/api-test.mjs        # session create/list/kill, state persistence
 node scripts/launcher-test.mjs   # folder browser validation, gh integration
 node scripts/images-test.mjs     # image upload endpoint
+node scripts/security-test.mjs   # cross-origin defence (REST + WebSocket)
+node scripts/features-test.mjs   # broadcast, reveal, bell field, auto-claude timing
 ```

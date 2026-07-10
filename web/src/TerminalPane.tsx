@@ -80,6 +80,15 @@ export default function TerminalPane({
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     let disposed = false;
     let sessionExited = false;
+    let reconnectAttempts = 0;
+
+    // Exponential backoff with jitter, capped — gentle on the server if it's
+    // down for a while, snappy for a quick blip.
+    const scheduleReconnect = () => {
+      const delay = Math.min(1000 * 2 ** reconnectAttempts, 15000);
+      reconnectAttempts++;
+      reconnectTimer = setTimeout(connect, delay + Math.random() * 300);
+    };
 
     const sendResize = () => {
       if (ws?.readyState === WebSocket.OPEN) {
@@ -110,7 +119,7 @@ export default function TerminalPane({
             ? "Can't reach the multiclaude server — retrying…"
             : `Couldn't start the shell: ${(err as Error).message}`
         );
-        reconnectTimer = setTimeout(connect, 2000);
+        scheduleReconnect();
         return;
       }
       if (disposed) return;
@@ -120,6 +129,7 @@ export default function TerminalPane({
       wsRef.current = ws;
 
       ws.onopen = () => {
+        reconnectAttempts = 0; // reset backoff once we're back
         setState("connected");
         setStatusMsg("");
         // Tell the shell its real window size straight away — terminal apps
@@ -149,7 +159,7 @@ export default function TerminalPane({
         if (disposed || sessionExited) return;
         setState("disconnected");
         setStatusMsg("Connection lost — reconnecting…");
-        reconnectTimer = setTimeout(connect, 1500);
+        scheduleReconnect();
       };
     };
     connect();
