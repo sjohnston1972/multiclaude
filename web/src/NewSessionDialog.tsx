@@ -5,9 +5,15 @@ import { Button, Modal } from "./components";
 interface BrowseResult {
   path: string | null;
   parent: string | null;
+  home: string;
   dirs: string[];
   drives: string[];
   recent: string[];
+}
+
+/** Last path segment, for compact button labels ("multiclaude", not the full path). */
+function basename(p: string): string {
+  return p.split(/[\\/]/).filter(Boolean).pop() ?? p;
 }
 
 interface Repo {
@@ -33,18 +39,23 @@ export default function NewSessionDialog({
 }) {
   const [mode, setMode] = useState<Mode>("folder");
   const [browse, setBrowse] = useState<BrowseResult | null>(null);
+  const [pathInput, setPathInput] = useState("");
   const [repos, setRepos] = useState<Repo[] | null>(null);
   const [ghError, setGhError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [autoClaude, setAutoClaude] = useState(true);
+  const [skipPermissions, setSkipPermissions] = useState(true);
   const [useWorktree, setUseWorktree] = useState(false);
   const [worktreeName, setWorktreeName] = useState("");
 
   const loadBrowse = (path?: string) => {
     setError(null);
     api<BrowseResult>(`/api/browse${path ? `?path=${encodeURIComponent(path)}` : ""}`)
-      .then(setBrowse)
+      .then((b) => {
+        setBrowse(b);
+        setPathInput(b.path ?? "");
+      })
       .catch((e) => setError(e.message));
   };
 
@@ -67,7 +78,7 @@ export default function NewSessionDialog({
         : null;
       const s = await api<SessionInfo>("/api/sessions", {
         method: "POST",
-        body: { cwd, autoClaude, worktree },
+        body: { cwd, autoClaude, worktree, skipPermissions },
       });
       onCreated(s);
       onClose();
@@ -118,6 +129,31 @@ export default function NewSessionDialog({
 
       {mode === "folder" && browse && (
         <div>
+          {/* Navigation bar: Up / Home / editable path (type or paste, Enter to go) */}
+          <div className="mb-2 flex items-center gap-1.5">
+            <Button
+              onClick={() => (browse.parent ? loadBrowse(browse.parent) : loadBrowse(undefined))}
+              disabled={browse.path === null}
+              title="Parent folder"
+            >
+              ⬆ Up
+            </Button>
+            <Button onClick={() => loadBrowse(browse.home)} title={browse.home}>
+              🏠 Home
+            </Button>
+            <input
+              type="text"
+              value={pathInput}
+              onChange={(e) => setPathInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && pathInput.trim()) loadBrowse(pathInput.trim());
+              }}
+              placeholder="Type or paste a path, press Enter"
+              spellCheck={false}
+              className="min-w-0 flex-1 rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-sm text-neutral-100 outline-none focus:border-blue-600"
+            />
+          </div>
+
           {browse.path === null ? (
             <>
               {browse.recent.length > 0 && (
@@ -127,11 +163,11 @@ export default function NewSessionDialog({
                     {browse.recent.map((f) => (
                       <button
                         key={f}
-                        onClick={() => void createSession(f)}
+                        onClick={() => loadBrowse(f)}
                         className="truncate rounded bg-neutral-800 px-3 py-1.5 text-left hover:bg-neutral-700"
-                        title={`Open a session in ${f}`}
+                        title={`Browse ${f}`}
                       >
-                        {f}
+                        📁 {f}
                       </button>
                     ))}
                   </div>
@@ -145,26 +181,14 @@ export default function NewSessionDialog({
                     onClick={() => loadBrowse(d)}
                     className="rounded bg-neutral-800 px-4 py-2 hover:bg-neutral-700"
                   >
-                    {d}
+                    💾 {d}
                   </button>
                 ))}
               </div>
             </>
           ) : (
             <>
-              <div className="mb-2 flex items-center gap-2">
-                <Button
-                  onClick={() =>
-                    browse.parent ? loadBrowse(browse.parent) : loadBrowse(undefined)
-                  }
-                >
-                  ⬆ Up
-                </Button>
-                <span className="truncate text-neutral-300" title={browse.path}>
-                  {browse.path}
-                </span>
-              </div>
-              <div className="mb-3 max-h-64 overflow-y-auto rounded border border-neutral-800">
+              <div className="mb-2 max-h-56 overflow-y-auto rounded border border-neutral-800">
                 {browse.dirs.length === 0 ? (
                   <p className="px-3 py-2 text-neutral-500">No subfolders</p>
                 ) : (
@@ -179,9 +203,19 @@ export default function NewSessionDialog({
                   ))
                 )}
               </div>
-              <Button kind="primary" onClick={() => void createSession(browse.path!)} disabled={!!busy}>
-                Open session in {browse.path}
-              </Button>
+              <div className="flex items-center justify-between gap-2">
+                <span className="truncate text-xs text-neutral-500" title={browse.path}>
+                  {browse.path}
+                </span>
+                <Button
+                  kind="primary"
+                  onClick={() => void createSession(browse.path!)}
+                  disabled={!!busy}
+                  title={`Start a session in ${browse.path}`}
+                >
+                  ▶ Start session in "{basename(browse.path)}"
+                </Button>
+              </div>
             </>
           )}
         </div>
@@ -240,6 +274,20 @@ export default function NewSessionDialog({
           <span>
             Auto-start <code className="rounded bg-neutral-800 px-1">claude</code> in the new
             session
+          </span>
+        </label>
+        <label className={`flex items-center gap-2 ${!autoClaude ? "opacity-40" : ""}`}>
+          <input
+            type="checkbox"
+            checked={skipPermissions}
+            disabled={!autoClaude}
+            onChange={(e) => setSkipPermissions(e.target.checked)}
+          />
+          <span>
+            Skip permission prompts
+            <span className="ml-1 text-xs text-neutral-500">
+              (--dangerously-skip-permissions)
+            </span>
           </span>
         </label>
         <label className={`flex items-center gap-2 ${!autoClaude ? "opacity-40" : ""}`}>

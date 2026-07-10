@@ -73,6 +73,8 @@ export default function SessionListModal({
                     <Button
                       kind="danger"
                       onClick={() => {
+                        // Optimistic: drop the row now; the server confirms in ~1s.
+                        setSessions((prev) => prev?.filter((x) => x.id !== s.id) ?? prev);
                         void onKill(s).then(refresh);
                       }}
                     >

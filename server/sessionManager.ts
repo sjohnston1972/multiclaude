@@ -199,23 +199,36 @@ export class SessionManager {
     };
   }
 
-  /** Graceful kill: Ctrl-C first (lets claude/git clean up), hard kill shortly after. */
-  kill(id: string): boolean {
+  /**
+   * Graceful kill: Ctrl-C first (lets claude/git clean up), hard kill shortly
+   * after. Resolves when the process has actually exited (bounded at 3s), so
+   * callers can report an accurate session list the moment we respond.
+   */
+  kill(id: string): Promise<boolean> {
     const s = this.sessions.get(id);
-    if (!s) return false;
-    try {
-      s.pty.write("\x03");
-    } catch {
-      // already gone
-    }
-    setTimeout(() => {
+    if (!s) return Promise.resolve(false);
+    return new Promise((resolve) => {
+      const finish = () => {
+        clearTimeout(hardKill);
+        clearTimeout(bail);
+        resolve(true);
+      };
+      s.exitListeners.add(finish);
       try {
-        if (!s.exited) s.pty.kill();
+        s.pty.write("\x03");
       } catch {
         // already gone
       }
-    }, KILL_GRACE_MS).unref();
-    return true;
+      const hardKill = setTimeout(() => {
+        try {
+          if (!s.exited) s.pty.kill();
+        } catch {
+          // already gone
+        }
+      }, KILL_GRACE_MS);
+      // Never leave the HTTP request hanging even if the exit event is lost.
+      const bail = setTimeout(finish, 3000);
+    });
   }
 
   /** Kill every session — used on server shutdown. */

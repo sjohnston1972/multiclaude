@@ -53,6 +53,7 @@ export function registerLauncherRoutes(app: FastifyInstance): void {
       return {
         path: null,
         parent: null,
+        home: os.homedir(),
         dirs: [],
         drives: listDrives(),
         recent: readState().recentFolders.filter((f) => fs.existsSync(f)),
@@ -81,9 +82,10 @@ export function registerLauncherRoutes(app: FastifyInstance): void {
     return {
       path: resolved,
       parent: parent !== resolved ? parent : null,
+      home: os.homedir(),
       dirs,
       drives: [],
-      recent: [],
+      recent: readState().recentFolders.filter((f) => fs.existsSync(f)),
     };
   });
 

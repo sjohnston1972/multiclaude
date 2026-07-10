@@ -25,33 +25,48 @@ address. Never expose it through a tunnel or reverse proxy.
 npm install
 ```
 
-## Run (development)
+## Run — the easy way
+
+Double-click **`start-multiclaude.cmd`** in the project folder. It builds the
+app if needed, starts the server invisibly in the background, and opens your
+browser at http://127.0.0.1:3001. Run it again any time — if the server is
+already up it just opens the browser.
+
+Want it always available? Run once in PowerShell:
+
+```
+.\scripts\install-startup.ps1     # start hidden at every Windows login
+.\scripts\uninstall-startup.ps1   # undo
+```
+
+To stop the server (this kills every terminal session it holds):
+
+```
+.\scripts\stop-multiclaude.ps1
+```
+
+## Run — for development
 
 ```
 npm run dev
 ```
 
-Then open **http://127.0.0.1:5173**.
-
-## Run (production build)
-
-```
-npm run build
-npm start
-```
-
-Then open **http://127.0.0.1:3001**. Same app, single process, no dev tooling.
+Then open **http://127.0.0.1:5173**. Code changes reload live. Or build and
+run the production version yourself: `npm run build` then `npm start`
+(http://127.0.0.1:3001).
 
 ## Using it
 
 - **＋ New session** — start a terminal in a local folder (browse or pick a
   recent one), in a GitHub repo (cloned via `gh` into
-  `~\multiclaude-workspaces\`), or as a blank shell. Optionally auto-start
-  `claude` (on by default) and/or run it in a git worktree so parallel
-  sessions on the same repo don't collide.
+  `~\multiclaude-workspaces\`), or as a blank shell. In the folder browser you
+  can also type or paste a path directly and press Enter. Options: auto-start
+  `claude` (on by default), skip its permission prompts
+  (`--dangerously-skip-permissions`, on by default), and/or run it in a git
+  worktree so parallel sessions on the same repo don't collide.
 - **Tabs and splits** — drag a tab to any edge to split the window; drag the
-  dividers to resize. The Single / 2-up / 2×2 buttons rearrange everything
-  into a preset grid. The layout is saved automatically and comes back after
+  dividers to resize. The Single / 2-up / 2×2 / 3×3 buttons rearrange
+  everything into a preset grid. The layout is saved automatically and comes back after
   a browser refresh or restart.
 - **Closing a tab** asks whether to kill the session or keep it running in
   the background. Background sessions are listed under **Sessions**, where

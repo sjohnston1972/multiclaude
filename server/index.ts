@@ -67,6 +67,7 @@ app.post("/api/sessions", async (req, reply) => {
     cwd?: string;
     autoClaude?: boolean;
     worktree?: string | null;
+    skipPermissions?: boolean;
   };
   let cwd: string | undefined;
   if (body.cwd) {
@@ -84,14 +85,15 @@ app.post("/api/sessions", async (req, reply) => {
   // same repo don't collide.
   let initialCommand: string | undefined;
   if (body.autoClaude) {
+    const flags = body.skipPermissions ? " --dangerously-skip-permissions" : "";
     if (body.worktree) {
       if (!/^[A-Za-z0-9._-]{1,50}$/.test(body.worktree)) {
         reply.code(400);
         return { error: "Worktree name may only contain letters, numbers, dots, dashes" };
       }
-      initialCommand = `claude --worktree ${body.worktree}`;
+      initialCommand = `claude --worktree ${body.worktree}${flags}`;
     } else {
-      initialCommand = "claude";
+      initialCommand = `claude${flags}`;
     }
   }
 
@@ -125,7 +127,9 @@ app.post("/api/sessions/:id/ensure", async (req, reply) => {
 
 app.delete("/api/sessions/:id", async (req, reply) => {
   const { id } = req.params as { id: string };
-  const found = sessions.kill(id);
+  // Resolves once the process has actually exited, so the client's next
+  // session list is accurate immediately.
+  const found = await sessions.kill(id);
   if (!found) reply.code(404);
   return { ok: found };
 });

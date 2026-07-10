@@ -145,13 +145,13 @@ export default function App() {
     async (killSession: boolean) => {
       if (!confirmClose || !model) return;
       if (killSession) {
-        try {
-          await api(`/api/sessions/${encodeURIComponent(confirmClose.sessionId)}`, {
-            method: "DELETE",
-          });
-        } catch {
+        // Fire and forget — the tab should close instantly; the server takes
+        // ~1s to Ctrl-C and reap the process in the background.
+        api(`/api/sessions/${encodeURIComponent(confirmClose.sessionId)}`, {
+          method: "DELETE",
+        }).catch(() => {
           /* already dead is fine */
-        }
+        });
       }
       // doAction bypasses onAction, so no confirmation loop.
       model.doAction(Actions.deleteTab(confirmClose.tabId));
@@ -163,7 +163,7 @@ export default function App() {
 
   // ---------------------------------------------------------------- presets
   const applyPreset = useCallback(
-    async (count: 1 | 2 | 4) => {
+    async (count: 1 | 2 | 4 | 9) => {
       if (!model) return;
       try {
         const tabs: IJsonTabNode[] = collectTerminalTabs().map((t) => ({
@@ -189,12 +189,15 @@ export default function App() {
         } else if (count === 2) {
           layout = { type: "row" as const, children: [tabset(sets[0]), tabset(sets[1])] };
         } else {
+          // Square grids (2×2, 3×3): one inner row per grid row.
+          const side = Math.sqrt(count);
           layout = {
             type: "row" as const,
-            children: [
-              { type: "row" as const, weight: 50, children: [tabset(sets[0]), tabset(sets[1])] },
-              { type: "row" as const, weight: 50, children: [tabset(sets[2]), tabset(sets[3])] },
-            ],
+            children: Array.from({ length: side }, (_, r) => ({
+              type: "row" as const,
+              weight: 100 / side,
+              children: sets.slice(r * side, (r + 1) * side).map(tabset),
+            })),
           };
         }
         const m = Model.fromJson({ global: GLOBAL_LAYOUT_OPTS, borders: [], layout });
@@ -377,6 +380,9 @@ export default function App() {
         </ToolbarButton>
         <ToolbarButton onClick={() => void applyPreset(4)} title="Four panes in a grid">
           2×2
+        </ToolbarButton>
+        <ToolbarButton onClick={() => void applyPreset(9)} title="Nine panes in a grid">
+          3×3
         </ToolbarButton>
         <div className="ml-auto flex items-center gap-1">
           <ToolbarButton onClick={() => setShowHealth(true)} title="Server and session health">
