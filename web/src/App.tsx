@@ -12,6 +12,12 @@ import {
   type ITabRenderValues,
 } from "flexlayout-react";
 import { api, AppSettings, AppState, SessionInfo } from "./api";
+import {
+  GLOBAL_LAYOUT_OPTS,
+  countTerminalTabs,
+  reconcileLayout,
+  tabJson,
+} from "./layoutReconcile";
 import TerminalPane from "./TerminalPane";
 import SessionListModal from "./SessionListModal";
 import NewSessionDialog from "./NewSessionDialog";
@@ -19,29 +25,6 @@ import SettingsModal from "./SettingsModal";
 import HealthModal from "./HealthModal";
 import BroadcastModal from "./BroadcastModal";
 import { Button, Modal, ToolbarButton } from "./components";
-
-const GLOBAL_LAYOUT_OPTS = {
-  tabEnableRename: true,
-  tabSetEnableMaximize: true,
-  splitterSize: 6,
-};
-
-function tabJson(s: { id: string; title: string; cwd: string }): IJsonTabNode {
-  return {
-    type: "tab",
-    name: s.title,
-    component: "terminal",
-    config: { sessionId: s.id, cwd: s.cwd },
-  };
-}
-
-function singleTabLayout(tab: IJsonTabNode): IJsonModel {
-  return {
-    global: GLOBAL_LAYOUT_OPTS,
-    borders: [],
-    layout: { type: "row", children: [{ type: "tabset", weight: 100, children: [tab] }] },
-  };
-}
 
 export default function App() {
   const [model, setModel] = useState<Model | null>(null);
@@ -63,19 +46,36 @@ export default function App() {
   } | null>(null);
   const layoutRef = useRef<ILayoutApi | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const didLoad = useRef(false);
 
   // ------------------------------------------------------------------ load
+  // Reconcile the saved layout against the sessions the server actually holds:
+  // every live session must get a tab, so a refresh can never leave a running
+  // session "detached" with no pane — even if the saved layout is empty or
+  // stale. Only when there are genuinely no sessions and no tabs do we spawn a
+  // fresh default one.
   useEffect(() => {
+    if (didLoad.current) return; // guard React 18 StrictMode double-invoke in dev
+    didLoad.current = true;
     (async () => {
       try {
         const state = await api<AppState>("/api/state");
         setSettings(state.settings);
-        if (state.layout) {
-          setModel(Model.fromJson(state.layout as IJsonModel));
-        } else {
+        const live = await api<SessionInfo[]>("/api/sessions").catch(() => []);
+
+        const { model: m, needsDefault, tabsetId } = reconcileLayout(
+          state.layout as IJsonModel | null,
+          live
+        );
+
+        // Nothing running and nothing to show → start one fresh session.
+        if (needsDefault && tabsetId) {
           const s = await api<SessionInfo>("/api/sessions", { method: "POST", body: {} });
-          setModel(Model.fromJson(singleTabLayout(tabJson(s))));
+          m.doAction(Actions.addTab(tabJson(s), tabsetId, DockLocation.CENTER, -1, true));
         }
+
+        setModel(m);
+        api("/api/state", { method: "PUT", body: { layout: m.toJson() } }).catch(() => {});
       } catch (e) {
         setError((e as Error).message);
       }

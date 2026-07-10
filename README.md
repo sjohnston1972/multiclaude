@@ -79,7 +79,16 @@ run the production version yourself: `npm run build` then `npm start`
   folder), **open the folder** in Explorer, or **copy its path**.
 - **Broadcast** (toolbar) types one command, plus Enter, into every live
   session at once — e.g. send the same instruction to every Claude, or run
-  `/clear` everywhere.
+  `/clear` everywhere. One-click presets cover common Claude slash commands
+  (`/clear`, `/compact`, `/cost`, `/status`, `/model`, `/exit`), shell commands
+  (`cls`, `git status`, `git pull`, `git fetch --all`), and controls (Enter,
+  Ctrl-C interrupt, Esc).
+- **Refresh brings everything back.** On load, multiclaude reconciles the saved
+  layout against the sessions the server is actually running: every live
+  session is guaranteed a tab, so a browser refresh never leaves a running
+  session stranded with no pane. (A side effect: sessions you "kept running in
+  the background" reappear as tabs after a refresh — a reload shows you
+  everything that's alive.)
 - **Tab titles** show the folder name and current git branch, refreshed
   automatically. Double-click a tab to rename it yourself (auto-renaming
   then leaves it alone). A green dot appears on a background tab when its
@@ -149,4 +158,5 @@ node scripts/images-test.mjs     # image upload endpoint
 node scripts/security-test.mjs   # cross-origin defence (REST + WebSocket)
 node scripts/features-test.mjs   # broadcast, reveal, bell field, auto-claude timing
 node scripts/create-test.mjs     # create-folder + create-repo validation
+npx tsx scripts/reconcile-test.ts # layout↔live-session reconciliation on load
 ```

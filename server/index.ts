@@ -156,11 +156,13 @@ app.post("/api/sessions/:id/ensure", async (req, reply) => {
   }
 });
 
-// Broadcast a command to every live session (types it and presses Enter).
+// Broadcast a command to every live session. Presses Enter after it unless
+// enter:false (used for control sequences like Ctrl-C).
 app.post("/api/broadcast", async (req) => {
-  const body = (req.body ?? {}) as { command?: string };
+  const body = (req.body ?? {}) as { command?: string; enter?: boolean };
   const command = typeof body.command === "string" ? body.command : "";
-  const count = sessions.writeAll(`${command}\r`);
+  const enter = body.enter !== false;
+  const count = sessions.writeAll(`${command}${enter ? "\r" : ""}`);
   return { ok: true, sent: count };
 });
 
