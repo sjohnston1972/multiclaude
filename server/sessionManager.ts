@@ -24,6 +24,8 @@ export interface Session {
   createdAt: number;
   title: string;
   branch: string | null;
+  /** Whether the working directory is inside a git repo (true even before the first commit). */
+  isRepo: boolean;
   lastOutputAt: number;
   /** When the shell last rang the terminal bell (\x07) — claude does this when it wants attention. */
   lastBellAt: number;
@@ -41,6 +43,7 @@ export interface SessionInfo {
   id: string;
   title: string;
   branch: string | null;
+  isRepo: boolean;
   cwd: string;
   pid: number;
   createdAt: number;
@@ -119,6 +122,7 @@ export class SessionManager {
       id: s.id,
       title: s.branch ? `${s.title} (${s.branch})` : s.title,
       branch: s.branch,
+      isRepo: s.isRepo,
       cwd: s.cwd,
       pid: s.pty.pid,
       createdAt: s.createdAt,
@@ -148,6 +152,7 @@ export class SessionManager {
       createdAt: Date.now(),
       title: path.basename(workingDir) || workingDir,
       branch: null,
+      isRepo: false,
       lastOutputAt: Date.now(),
       lastBellAt: 0,
       scrollback: [],
@@ -197,7 +202,7 @@ export class SessionManager {
     }
 
     this.sessions.set(id, session);
-    this.refreshBranch(session);
+    this.refreshGit(session);
     return session;
   }
 
@@ -304,17 +309,31 @@ export class SessionManager {
   }
 
   private refreshBranches(): void {
-    for (const s of this.sessions.values()) this.refreshBranch(s);
+    for (const s of this.sessions.values()) this.refreshGit(s);
   }
 
-  private refreshBranch(s: Session): void {
+  /** Detect whether cwd is a git repo and, if so, its current branch. */
+  private refreshGit(s: Session): void {
     execFile(
       "git",
-      ["-C", s.cwd, "branch", "--show-current"],
+      ["-C", s.cwd, "rev-parse", "--is-inside-work-tree"],
       { timeout: 5000, windowsHide: true },
       (err, stdout) => {
         if (s.exited) return;
-        s.branch = err ? null : stdout.trim() || null;
+        s.isRepo = !err && stdout.trim() === "true";
+        if (!s.isRepo) {
+          s.branch = null;
+          return;
+        }
+        execFile(
+          "git",
+          ["-C", s.cwd, "branch", "--show-current"],
+          { timeout: 5000, windowsHide: true },
+          (e2, out2) => {
+            if (s.exited) return;
+            s.branch = e2 ? null : out2.trim() || null;
+          }
+        );
       }
     );
   }

@@ -63,7 +63,9 @@ run the production version yourself: `npm run build` then `npm start`
   recent one), in a GitHub repo (cloned via `gh` into
   `~\multiclaude-workspaces\`), or as a blank shell. In the folder browser you
   can also type or paste a path directly and press Enter, or **create a new
-  folder** on the spot and open a session in it. On the GitHub tab you can
+  folder** on the spot and open a session in it — optionally making it a **git
+  repo** (on by default) and even **publishing it to GitHub** (creates the repo
+  with an initial commit and pushes). On the GitHub tab you can
   **create a brand-new repo** (pick private/public each time; it's initialised
   with a README, cloned into your workspace, and opened). Options: auto-start
   `claude` (on by default), skip its permission prompts
@@ -76,7 +78,8 @@ run the production version yourself: `npm run build` then `npm start`
 - **Closing a tab** asks whether to kill the session or keep it running in
   the background. Background sessions are listed under **Sessions**, where you
   can reattach, kill, kill-all, **duplicate** (a new session in the same
-  folder), **open the folder** in Explorer, or **copy its path**.
+  folder), **open the folder** in Explorer, or **copy its path**. A green
+  **git** badge marks sessions whose folder is a git repo.
 - **Broadcast** (toolbar) types one command, plus Enter, into every live
   session at once — e.g. send the same instruction to every Claude, or run
   `/clear` everywhere. One-click presets cover common Claude slash commands
@@ -159,4 +162,5 @@ node scripts/security-test.mjs   # cross-origin defence (REST + WebSocket)
 node scripts/features-test.mjs   # broadcast, reveal, bell field, auto-claude timing
 node scripts/create-test.mjs     # create-folder + create-repo validation
 npx tsx scripts/reconcile-test.ts # layout↔live-session reconciliation on load
+node scripts/git-features-test.mjs # git-init, isRepo detection, publish validation
 ```

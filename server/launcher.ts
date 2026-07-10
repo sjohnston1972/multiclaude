@@ -91,7 +91,7 @@ export function registerLauncherRoutes(app: FastifyInstance): void {
 
   // ------------------------------------------------------- create a subfolder
   app.post("/api/mkdir", async (req, reply) => {
-    const body = (req.body ?? {}) as { parent?: string; name?: string };
+    const body = (req.body ?? {}) as { parent?: string; name?: string; git?: boolean };
     const parent = body.parent ? validateDirPath(body.parent) : null;
     if (!parent) {
       reply.code(400);
@@ -110,10 +110,110 @@ export function registerLauncherRoutes(app: FastifyInstance): void {
     }
     try {
       fs.mkdirSync(target);
-      return { path: target };
     } catch (err) {
       reply.code(500);
       return { error: `Couldn't create the folder: ${(err as Error).message}` };
+    }
+
+    let git = false;
+    let gitWarning: string | undefined;
+    if (body.git) {
+      try {
+        // -b main gives the repo a named branch straight away (shown in the
+        // tab title) even before the first commit.
+        await execFileAsync("git", ["-C", target, "init", "-b", "main"], {
+          timeout: 15_000,
+          windowsHide: true,
+        });
+        git = true;
+      } catch (err) {
+        const e = err as NodeJS.ErrnoException;
+        gitWarning =
+          e.code === "ENOENT"
+            ? "Folder created, but git isn't installed so it wasn't initialised."
+            : `Folder created, but 'git init' failed: ${(e.message ?? "").trim()}`;
+      }
+    }
+    return { path: target, git, gitWarning };
+  });
+
+  // ------------------------------ publish an existing local folder to GitHub
+  app.post("/api/github/publish", async (req, reply) => {
+    const body = (req.body ?? {}) as { path?: string; name?: string; visibility?: string };
+    const dir = body.path ? validateDirPath(body.path) : null;
+    if (!dir) {
+      reply.code(400);
+      return { error: "That folder can't be published" };
+    }
+    const name = (body.name ?? "").trim();
+    if (!/^[A-Za-z0-9._-]{1,100}$/.test(name)) {
+      reply.code(400);
+      return { error: "Repo name may only use letters, numbers, dots, dashes, underscores" };
+    }
+    if (body.visibility !== "public" && body.visibility !== "private") {
+      reply.code(400);
+      return { error: "Choose whether the repo is public or private" };
+    }
+
+    const run = (cmd: string, args: string[], timeout = 30_000) =>
+      execFileAsync(cmd, args, { cwd: dir, timeout, windowsHide: true });
+
+    try {
+      // 1. Make sure it's a git repo.
+      if (!fs.existsSync(path.join(dir, ".git"))) {
+        await run("git", ["init", "-b", "main"]);
+      }
+      // 2. Make sure there's at least one commit (gh --push needs something to push).
+      let hasCommit = true;
+      try {
+        await run("git", ["rev-parse", "HEAD"]);
+      } catch {
+        hasCommit = false;
+      }
+      if (!hasCommit) {
+        const readme = path.join(dir, "README.md");
+        if (!fs.existsSync(readme)) fs.writeFileSync(readme, `# ${name}\n`);
+        await run("git", ["add", "-A"]);
+        await run("git", ["commit", "-m", "Initial commit"]);
+      }
+      // 3. Create the GitHub repo from this folder and push.
+      const { stdout } = await run(
+        "gh",
+        [
+          "repo",
+          "create",
+          name,
+          body.visibility === "public" ? "--public" : "--private",
+          "--source",
+          ".",
+          "--remote",
+          "origin",
+          "--push",
+        ],
+        120_000
+      );
+      const url = (stdout.match(/https?:\/\/\S+/) ?? [""])[0].trim();
+      return { ok: true, url };
+    } catch (err) {
+      const e = err as NodeJS.ErrnoException & { stderr?: string };
+      reply.code(500);
+      const stderr = (e.stderr ?? "").trim();
+      if (e.code === "ENOENT") {
+        return { error: "Need git and the GitHub CLI (gh) installed to publish." };
+      }
+      if (/already exists/i.test(stderr)) {
+        return { error: `A repo named "${name}" already exists on your GitHub account.` };
+      }
+      if (/auth|not logged in/i.test(stderr)) {
+        return { error: "GitHub CLI isn't signed in. Run 'gh auth login', then try again." };
+      }
+      if (/please tell me who you are|user\.email|user\.name/i.test(stderr)) {
+        return {
+          error:
+            "git has no name/email configured for the commit. Set them with 'git config --global user.name' and 'user.email', then retry.",
+        };
+      }
+      return { error: `Publish failed: ${stderr || e.message}` };
     }
   });
 

@@ -4,6 +4,7 @@ export interface SessionInfo {
   id: string;
   title: string;
   branch: string | null;
+  isRepo: boolean;
   cwd: string;
   pid: number;
   createdAt: number;

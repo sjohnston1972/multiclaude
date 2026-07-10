@@ -52,6 +52,9 @@ export default function NewSessionDialog({
   // "Create new folder" (folder tab) and "Create new repo" (github tab)
   const [newFolderName, setNewFolderName] = useState("");
   const [showNewFolder, setShowNewFolder] = useState(false);
+  const [newFolderGit, setNewFolderGit] = useState(true);
+  const [newFolderPublish, setNewFolderPublish] = useState(false);
+  const [newFolderVisibility, setNewFolderVisibility] = useState<"private" | "public" | null>(null);
   const [showCreateRepo, setShowCreateRepo] = useState(false);
   const [repoName, setRepoName] = useState("");
   const [repoVisibility, setRepoVisibility] = useState<"private" | "public" | null>(null);
@@ -98,13 +101,22 @@ export default function NewSessionDialog({
 
   const createFolderAndOpen = async () => {
     if (!browse?.path) return;
+    const wantPublish = newFolderGit && newFolderPublish;
     setBusy("Creating folder…");
     setError(null);
     try {
-      const r = await api<{ path: string }>("/api/mkdir", {
+      const r = await api<{ path: string; gitWarning?: string }>("/api/mkdir", {
         method: "POST",
-        body: { parent: browse.path, name: newFolderName.trim() },
+        body: { parent: browse.path, name: newFolderName.trim(), git: newFolderGit },
       });
+      if (r.gitWarning) setError(r.gitWarning); // non-fatal — folder still opens
+      if (wantPublish) {
+        setBusy(`Publishing ${newFolderName.trim()} to GitHub…`);
+        await api("/api/github/publish", {
+          method: "POST",
+          body: { path: r.path, name: newFolderName.trim(), visibility: newFolderVisibility },
+        });
+      }
       await createSession(r.path);
     } catch (e) {
       setError((e as Error).message);
@@ -244,28 +256,74 @@ export default function NewSessionDialog({
               </div>
               {/* Create a new subfolder here, then open a session in it. */}
               {showNewFolder ? (
-                <div className="mb-2 flex items-center gap-2 rounded border border-neutral-700 bg-neutral-800/50 p-2">
-                  <input
-                    autoFocus
-                    type="text"
-                    value={newFolderName}
-                    onChange={(e) => setNewFolderName(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && newFolderName.trim()) void createFolderAndOpen();
-                      else if (e.key === "Escape") setShowNewFolder(false);
-                    }}
-                    placeholder="New folder name"
-                    spellCheck={false}
-                    className="min-w-0 flex-1 rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-sm outline-none focus:border-blue-600"
-                  />
-                  <Button
-                    kind="primary"
-                    onClick={() => void createFolderAndOpen()}
-                    disabled={!!busy || !newFolderName.trim()}
-                  >
-                    Create &amp; open
-                  </Button>
-                  <Button onClick={() => setShowNewFolder(false)}>Cancel</Button>
+                <div className="mb-2 flex flex-col gap-2 rounded border border-neutral-700 bg-neutral-800/50 p-2">
+                  <div className="flex items-center gap-2">
+                    <input
+                      autoFocus
+                      type="text"
+                      value={newFolderName}
+                      onChange={(e) => setNewFolderName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && newFolderName.trim() && !(newFolderGit && newFolderPublish && !newFolderVisibility))
+                          void createFolderAndOpen();
+                        else if (e.key === "Escape") setShowNewFolder(false);
+                      }}
+                      placeholder="New folder name"
+                      spellCheck={false}
+                      className="min-w-0 flex-1 rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-sm outline-none focus:border-blue-600"
+                    />
+                    <Button
+                      kind="primary"
+                      onClick={() => void createFolderAndOpen()}
+                      disabled={
+                        !!busy ||
+                        !newFolderName.trim() ||
+                        (newFolderGit && newFolderPublish && !newFolderVisibility)
+                      }
+                    >
+                      Create &amp; open
+                    </Button>
+                    <Button onClick={() => setShowNewFolder(false)}>Cancel</Button>
+                  </div>
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={newFolderGit}
+                      onChange={(e) => setNewFolderGit(e.target.checked)}
+                    />
+                    Make it a git repo
+                  </label>
+                  <label className={`flex items-center gap-2 text-sm ${!newFolderGit ? "opacity-40" : ""}`}>
+                    <input
+                      type="checkbox"
+                      checked={newFolderPublish}
+                      disabled={!newFolderGit}
+                      onChange={(e) => setNewFolderPublish(e.target.checked)}
+                    />
+                    Publish to GitHub
+                    {newFolderGit && newFolderPublish && (
+                      <span className="ml-1 inline-flex gap-3">
+                        <label className="flex items-center gap-1">
+                          <input
+                            type="radio"
+                            name="nf-vis"
+                            checked={newFolderVisibility === "private"}
+                            onChange={() => setNewFolderVisibility("private")}
+                          />
+                          Private
+                        </label>
+                        <label className="flex items-center gap-1">
+                          <input
+                            type="radio"
+                            name="nf-vis"
+                            checked={newFolderVisibility === "public"}
+                            onChange={() => setNewFolderVisibility("public")}
+                          />
+                          Public
+                        </label>
+                      </span>
+                    )}
+                  </label>
                 </div>
               ) : (
                 <button

@@ -99,7 +99,17 @@ export default function SessionListModal({
           <tbody>
             {sessions.map((s) => (
               <tr key={s.id} className="border-t border-neutral-800">
-                <td className="py-2 pr-3 font-medium">{s.title}</td>
+                <td className="py-2 pr-3 font-medium">
+                  {s.title}
+                  {s.isRepo && (
+                    <span
+                      className="ml-2 rounded bg-emerald-900 px-1.5 py-0.5 align-middle text-xs font-normal text-emerald-300"
+                      title={s.branch ? `git repo — branch ${s.branch}` : "git repo"}
+                    >
+                      git
+                    </span>
+                  )}
+                </td>
                 <td className="max-w-[220px] truncate py-2 pr-3 text-neutral-400" title={s.cwd}>
                   {s.cwd}
                 </td>
