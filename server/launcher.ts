@@ -130,8 +130,11 @@ export function registerLauncherRoutes(app: FastifyInstance): void {
 
     const target = path.join(parent, ...segments);
     // Belt-and-suspenders: the created path must stay inside the parent.
-    if (path.resolve(target) !== path.resolve(parent) &&
-        !path.resolve(target).startsWith(path.resolve(parent) + path.sep)) {
+    // Normalise the trailing separator so a drive root ("C:\") compares right.
+    const rp = path.resolve(parent);
+    const rpWithSep = rp.endsWith(path.sep) ? rp : rp + path.sep;
+    const rt = path.resolve(target);
+    if (rt !== rp && !rt.startsWith(rpWithSep)) {
       reply.code(400);
       return { error: "That folder path escapes the parent folder" };
     }
