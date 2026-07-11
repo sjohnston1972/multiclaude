@@ -8,3 +8,23 @@ body,
   height: 100%;
   margin: 0;
 }
+
+/* Blinking prompt caret on the home screen. */
+@keyframes mc-blink {
+  0%,
+  50% {
+    opacity: 1;
+  }
+  50.01%,
+  100% {
+    opacity: 0;
+  }
+}
+.mc-caret {
+  animation: mc-blink 1.1s steps(1) infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .mc-caret {
+    animation: none;
+  }
+}

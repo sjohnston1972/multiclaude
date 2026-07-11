@@ -93,6 +93,24 @@ app.get("/api/health", async () => ({
 
 app.get("/api/sessions", async () => sessions.list());
 
+// Recent workspaces for the home-screen tiles: recently-used folders that
+// still exist, newest first, flagged if they're git repos.
+app.get("/api/recent", async () => {
+  return readState()
+    .recentFolders.filter((f) => {
+      try {
+        return fs.statSync(f).isDirectory();
+      } catch {
+        return false;
+      }
+    })
+    .map((f) => ({
+      path: f,
+      name: path.basename(f) || f,
+      isRepo: fs.existsSync(path.join(f, ".git")),
+    }));
+});
+
 // Workspace restore: sessions that were alive when the server last stopped and
 // aren't running now. The browser offers to bring them back on load.
 app.get("/api/sessions/restorable", async () => sessions.restorableSpecs());

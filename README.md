@@ -59,6 +59,10 @@ run the production version yourself: `npm run build` then `npm start`
 
 ## Using it
 
+- **Home screen.** With no sessions open, multiclaude shows a home screen: a
+  grid of **recent workspaces** you can click to drop straight back into a
+  session there (it opens the folder and starts Claude), plus New session and
+  Blank shell. Close every tab and you're back at the home screen.
 - **＋ New session** — start a terminal in a local folder (browse or pick a
   recent one), in a GitHub repo (cloned via `gh` into
   `~\multiclaude-workspaces\`), or as a blank shell. In the folder browser you

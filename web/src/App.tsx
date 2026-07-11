@@ -26,6 +26,7 @@ import HealthModal from "./HealthModal";
 import BroadcastModal from "./BroadcastModal";
 import RestoreModal, { type RestorableSpec } from "./RestoreModal";
 import CommandPalette, { type Command } from "./CommandPalette";
+import Hero from "./Hero";
 import { updateFavicon } from "./favicon";
 import { notify } from "./notifications";
 import { Button, Modal, ToolbarButton } from "./components";
@@ -54,6 +55,7 @@ export default function App() {
   } | null>(null);
   const [restorable, setRestorable] = useState<RestorableSpec[] | null>(null);
   const [restoreBusy, setRestoreBusy] = useState(false);
+  const [tabCount, setTabCount] = useState(0);
   const pendingLayoutRef = useRef<unknown | null>(null);
   const layoutRef = useRef<ILayoutApi | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -66,15 +68,13 @@ export default function App() {
   // stale. Only when there are genuinely no sessions and no tabs do we spawn a
   // fresh default one.
   // Build the model from a (possibly null) saved layout, reconciling against
-  // the sessions the server currently holds; start a fresh one if empty.
+  // the sessions the server currently holds. No default session is created —
+  // an empty model shows the home screen (Hero) instead.
   const buildModel = useCallback(async (layout: unknown | null) => {
     const live = await api<SessionInfo[]>("/api/sessions").catch(() => []);
-    const { model: m, needsDefault, tabsetId } = reconcileLayout(layout as IJsonModel | null, live);
-    if (needsDefault && tabsetId) {
-      const s = await api<SessionInfo>("/api/sessions", { method: "POST", body: {} });
-      m.doAction(Actions.addTab(tabJson(s), tabsetId, DockLocation.CENTER, -1, true));
-    }
+    const { model: m } = reconcileLayout(layout as IJsonModel | null, live);
     setModel(m);
+    setTabCount(countTerminalTabs(m));
     api("/api/state", { method: "PUT", body: { layout: m.toJson() } }).catch(() => {});
   }, []);
 
@@ -168,6 +168,32 @@ export default function App() {
     [model, persistLayout]
   );
 
+  // Open a session in a specific folder (home-screen tile) — starts claude,
+  // matching the New Session dialog's defaults, for a one-click resume.
+  const openFolderSession = useCallback(
+    async (cwd: string) => {
+      try {
+        const s = await api<SessionInfo>("/api/sessions", {
+          method: "POST",
+          body: { cwd, autoClaude: true, skipPermissions: true },
+        });
+        addSessionTab(s);
+      } catch (e) {
+        setError((e as Error).message);
+      }
+    },
+    [addSessionTab]
+  );
+
+  const openBlankShell = useCallback(async () => {
+    try {
+      const s = await api<SessionInfo>("/api/sessions", { method: "POST", body: {} });
+      addSessionTab(s);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }, [addSessionTab]);
+
   // ------------------------------------------------- close tab confirmation
   const onAction = useCallback(
     (action: Action): Action | undefined => {
@@ -248,6 +274,7 @@ export default function App() {
         }
         const m = Model.fromJson({ global: GLOBAL_LAYOUT_OPTS, borders: [], layout });
         setModel(m);
+        setTabCount(countTerminalTabs(m));
         persistLayout(m);
       } catch (e) {
         setError((e as Error).message);
@@ -600,9 +627,20 @@ export default function App() {
                 setDots((d) => (d[sid] ? { ...d, [sid]: false } : d));
               }
             }
+            setTabCount(countTerminalTabs(m));
             persistLayout(m);
           }}
         />
+        {/* Home screen: shown over the (empty) layout whenever nothing's open. */}
+        {tabCount === 0 && (
+          <div className="absolute inset-0">
+            <Hero
+              onOpenFolder={(cwd) => void openFolderSession(cwd)}
+              onNewSession={() => setShowNew(true)}
+              onBlankShell={() => void openBlankShell()}
+            />
+          </div>
+        )}
       </div>
 
       {showNew && (
