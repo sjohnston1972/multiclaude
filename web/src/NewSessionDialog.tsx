@@ -119,10 +119,12 @@ export default function NewSessionDialog({
       });
       if (r.gitWarning || r.fileWarning) setError(r.gitWarning ?? r.fileWarning ?? null); // non-fatal
       if (wantPublish) {
-        setBusy(`Publishing ${newFolderName.trim()} to GitHub…`);
+        // For a nested path the repo is named after the final folder only.
+        const repoName = basename(r.path);
+        setBusy(`Publishing ${repoName} to GitHub…`);
         await api("/api/github/publish", {
           method: "POST",
-          body: { path: r.path, name: newFolderName.trim(), visibility: newFolderVisibility },
+          body: { path: r.path, name: repoName, visibility: newFolderVisibility },
         });
       }
       await createSession(r.path);
