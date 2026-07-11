@@ -21,8 +21,13 @@ from an **admin** PowerShell) you may need to allow the port through the
 firewall:
 
 ```
-New-NetFirewallRule -DisplayName "multiclaude LAN" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 3001 -Profile Private
+New-NetFirewallRule -DisplayName "multiclaude LAN" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 3001 -Profile Any
 ```
+
+(`-Profile Any` works whether Windows labels your network Private or Public —
+home Ethernet is often Public. If you also run a VPN like NordVPN, make sure
+its "allow LAN / local network" setting is on, or it may block other machines
+from reaching this PC.)
 
 ⚠️ **This exposes a real shell on this PC to anyone who can reach the port —
 only do it on a network you trust.** Even in LAN mode, requests are still

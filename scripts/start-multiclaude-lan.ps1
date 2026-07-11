@@ -15,11 +15,12 @@ if (-not (Test-Path "$root\dist\server\index.js") -or -not (Test-Path "$root\web
     Pop-Location
 }
 
-# One-time (needs an elevated shell): open the port for private networks.
+# One-time (needs an elevated shell): open the port. Uses -Profile Any so it
+# works whether Windows has labelled your network Private or Public.
 $rule = Get-NetFirewallRule -DisplayName "multiclaude LAN" -ErrorAction SilentlyContinue
 if (-not $rule) {
     Write-Host "Tip: to let LAN machines connect, run this ONCE in an ADMIN PowerShell:"
-    Write-Host "  New-NetFirewallRule -DisplayName 'multiclaude LAN' -Direction Inbound -Action Allow -Protocol TCP -LocalPort $port -Profile Private" -ForegroundColor Yellow
+    Write-Host "  New-NetFirewallRule -DisplayName 'multiclaude LAN' -Direction Inbound -Action Allow -Protocol TCP -LocalPort $port -Profile Any" -ForegroundColor Yellow
 }
 
 $env:MULTICLAUDE_HOST = "0.0.0.0"
