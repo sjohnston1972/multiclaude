@@ -237,6 +237,25 @@ app.delete("/api/sessions", async () => {
   return { ok: true, killed: ids.length };
 });
 
+// Point a session at a folder (right-click a tab → browse). cd's the shell and
+// renames the tab to the folder.
+app.post("/api/sessions/:id/cd", async (req, reply) => {
+  const { id } = req.params as { id: string };
+  const body = (req.body ?? {}) as { path?: string };
+  const dir = body.path ? path.resolve(body.path) : null;
+  if (!dir || !fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) {
+    reply.code(400);
+    return { error: "That folder doesn't exist" };
+  }
+  const session = sessions.changeDir(id, dir);
+  if (!session) {
+    reply.code(404);
+    return { error: "Session not found or already exited" };
+  }
+  rememberFolder(dir);
+  return sessions.info(session);
+});
+
 app.delete("/api/sessions/:id", async (req, reply) => {
   const { id } = req.params as { id: string };
   // Resolves once the process has actually exited, so the client's next

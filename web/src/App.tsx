@@ -27,6 +27,7 @@ import BroadcastModal from "./BroadcastModal";
 import RestoreModal, { type RestorableSpec } from "./RestoreModal";
 import CommandPalette, { type Command } from "./CommandPalette";
 import Hero from "./Hero";
+import FolderPickerModal from "./FolderPickerModal";
 import { updateFavicon } from "./favicon";
 import { notify } from "./notifications";
 import { Button, Modal, ToolbarButton } from "./components";
@@ -42,6 +43,8 @@ export default function App() {
   const [showBroadcast, setShowBroadcast] = useState(false);
   const [showPalette, setShowPalette] = useState(false);
   const [liveSessions, setLiveSessions] = useState<SessionInfo[]>([]);
+  const [tabMenu, setTabMenu] = useState<{ x: number; y: number; tabId: string; sessionId: string } | null>(null);
+  const [pickFolderFor, setPickFolderFor] = useState<{ tabId: string; sessionId: string } | null>(null);
   const [dots, setDots] = useState<Record<string, boolean>>({});
   const lastSeenRef = useRef<Record<string, number>>({});
   const autoTitleRef = useRef<Record<string, string>>({});
@@ -193,6 +196,28 @@ export default function App() {
       setError((e as Error).message);
     }
   }, [addSessionTab]);
+
+  // Right-click a tab → browse to a folder: cd the shell there and rename the
+  // tab to the folder (the server also updates the tracked cwd + branch).
+  const changeTabFolder = useCallback(
+    async (tabId: string, sessionId: string, folder: string) => {
+      try {
+        const info = await api<SessionInfo>(`/api/sessions/${encodeURIComponent(sessionId)}/cd`, {
+          method: "POST",
+          body: { path: folder },
+        });
+        if (model) {
+          model.doAction(Actions.renameTab(tabId, info.title));
+          // Let the auto-title refresh keep this name (don't treat it as a manual rename).
+          autoTitleRef.current[sessionId] = info.title;
+          persistLayout(model);
+        }
+      } catch (e) {
+        setError((e as Error).message);
+      }
+    },
+    [model, persistLayout]
+  );
 
   // ------------------------------------------------- close tab confirmation
   const onAction = useCallback(
@@ -617,6 +642,15 @@ export default function App() {
           factory={factory}
           onAction={onAction}
           onRenderTab={onRenderTab}
+          onContextMenu={(node, event) => {
+            if (node.getType() === "tab" && (node as TabNode).getComponent() === "terminal") {
+              event.preventDefault();
+              const sid = ((node as TabNode).getConfig() as { sessionId?: string })?.sessionId;
+              if (sid) {
+                setTabMenu({ x: event.clientX, y: event.clientY, tabId: node.getId(), sessionId: sid });
+              }
+            }
+          }}
           onModelChange={(m, action) => {
             if (action.type === Actions.SELECT_TAB) {
               // Selecting a tab counts as "seen" — clear its dot immediately.
@@ -681,6 +715,38 @@ export default function App() {
 
       {showPalette && (
         <CommandPalette commands={paletteCommands} onClose={() => setShowPalette(false)} />
+      )}
+
+      {/* Right-click tab menu */}
+      {tabMenu && (
+        <>
+          <div className="fixed inset-0 z-40" onMouseDown={() => setTabMenu(null)} />
+          <div
+            className="fixed z-50 min-w-[180px] overflow-hidden rounded-md border border-neutral-700 bg-neutral-900 py-1 shadow-xl"
+            style={{ left: tabMenu.x, top: tabMenu.y }}
+          >
+            <button
+              onClick={() => {
+                setPickFolderFor({ tabId: tabMenu.tabId, sessionId: tabMenu.sessionId });
+                setTabMenu(null);
+              }}
+              className="block w-full px-3 py-1.5 text-left text-sm text-neutral-200 hover:bg-neutral-700"
+            >
+              Browse to folder…
+            </button>
+          </div>
+        </>
+      )}
+
+      {pickFolderFor && (
+        <FolderPickerModal
+          title="Browse to folder — the shell will cd there"
+          onClose={() => setPickFolderFor(null)}
+          onPick={(folder) => {
+            void changeTabFolder(pickFolderFor.tabId, pickFolderFor.sessionId, folder);
+            setPickFolderFor(null);
+          }}
+        />
       )}
 
       {confirmClose && (

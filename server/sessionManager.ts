@@ -298,6 +298,21 @@ export class SessionManager {
     if (s && !s.exited) s.pty.write(data);
   }
 
+  /**
+   * Point a session at a different folder: cd the shell there, and update the
+   * tracked cwd/title/branch so the tab and restore manifest follow.
+   */
+  changeDir(id: string, dir: string): Session | undefined {
+    const s = this.sessions.get(id);
+    if (!s || s.exited) return undefined;
+    s.pty.write(`Set-Location -LiteralPath "${dir}"\r`);
+    s.cwd = dir;
+    s.title = path.basename(dir) || dir;
+    this.persistManifest();
+    this.refreshGit(s);
+    return s;
+  }
+
   /** Write the same data to every live session (used by "broadcast to all"). */
   writeAll(data: string): number {
     let n = 0;

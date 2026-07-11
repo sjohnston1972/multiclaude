@@ -100,6 +100,9 @@ run the production version yourself: `npm run build` then `npm start`
   dividers to resize. The Single / 2-up / 2×2 / 3×3 buttons rearrange
   everything into a preset grid. The layout is saved automatically and comes back after
   a browser refresh or restart.
+- **Right-click a tab → "Browse to folder…"** to point that shell at a
+  different folder: it `cd`s the shell there and renames the tab to the folder
+  (handy for blank shells you started in your home directory).
 - **Closing a tab** asks whether to kill the session or keep it running in
   the background. Background sessions are listed under **Sessions**, where you
   can reattach, kill, kill-all, **duplicate** (a new session in the same
