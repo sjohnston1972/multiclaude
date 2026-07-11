@@ -125,7 +125,7 @@ export default function FolderPickerModal({
                       if (e.key === "Enter") createFolder();
                       else if (e.key === "Escape") setShowNewFolder(false);
                     }}
-                    placeholder="New folder name"
+                    placeholder="New folder name (or nested\path)"
                     spellCheck={false}
                     className="min-w-0 flex-1 rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-sm outline-none focus:border-blue-600"
                   />

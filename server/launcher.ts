@@ -102,11 +102,16 @@ export function registerLauncherRoutes(app: FastifyInstance): void {
       reply.code(400);
       return { error: "That parent folder can't be written to" };
     }
+    // Allow a nested path like "projects\triage-demo" (created mkdir -p style).
+    // Split into segments and validate each — no drive letters, no "..".
     const name = (body.name ?? "").trim();
-    // A single folder name — no path separators, drive letters or traversal.
-    if (!/^[A-Za-z0-9 ._-]{1,80}$/.test(name) || name === "." || name === "..") {
+    const segments = name.split(/[\\/]+/).filter((s) => s.length > 0);
+    const segmentOk = (s: string) => /^[A-Za-z0-9 ._-]{1,80}$/.test(s) && s !== "." && s !== "..";
+    if (segments.length === 0 || !segments.every(segmentOk)) {
       reply.code(400);
-      return { error: "Folder name may only use letters, numbers, spaces, dots, dashes" };
+      return {
+        error: "Folder name may only use letters, numbers, spaces, dots, dashes (use \\ for nested folders)",
+      };
     }
 
     // Optional starter file — validate its name before creating anything.
@@ -123,13 +128,19 @@ export function registerLauncherRoutes(app: FastifyInstance): void {
       }
     }
 
-    const target = path.join(parent, name);
+    const target = path.join(parent, ...segments);
+    // Belt-and-suspenders: the created path must stay inside the parent.
+    if (path.resolve(target) !== path.resolve(parent) &&
+        !path.resolve(target).startsWith(path.resolve(parent) + path.sep)) {
+      reply.code(400);
+      return { error: "That folder path escapes the parent folder" };
+    }
     if (fs.existsSync(target)) {
       reply.code(409);
-      return { error: `A folder named "${name}" already exists here` };
+      return { error: `"${name}" already exists here` };
     }
     try {
-      fs.mkdirSync(target);
+      fs.mkdirSync(target, { recursive: true }); // creates intermediate folders
     } catch (err) {
       reply.code(500);
       return { error: `Couldn't create the folder: ${(err as Error).message}` };
