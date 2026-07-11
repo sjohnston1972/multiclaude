@@ -24,6 +24,8 @@ export default function FolderPickerModal({
   const [browse, setBrowse] = useState<BrowseResult | null>(null);
   const [pathInput, setPathInput] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [showNewFolder, setShowNewFolder] = useState(false);
+  const [newFolderName, setNewFolderName] = useState("");
 
   const load = (path?: string) => {
     setError(null);
@@ -36,6 +38,20 @@ export default function FolderPickerModal({
   };
 
   useEffect(() => load(), []);
+
+  const createFolder = () => {
+    if (!browse?.path || !newFolderName.trim()) return;
+    api<{ path: string }>("/api/mkdir", {
+      method: "POST",
+      body: { parent: browse.path, name: newFolderName.trim() },
+    })
+      .then(() => {
+        setShowNewFolder(false);
+        setNewFolderName("");
+        load(browse.path!); // re-read so the new folder shows up
+      })
+      .catch((e) => setError(e.message));
+  };
 
   return (
     <Modal title={title} onClose={onClose} wide>
@@ -52,6 +68,9 @@ export default function FolderPickerModal({
             </Button>
             <Button onClick={() => load(browse.home)} title={browse.home}>
               🏠 Home
+            </Button>
+            <Button onClick={() => load(browse.path ?? undefined)} title="Refresh this folder">
+              ↻
             </Button>
             <input
               type="text"
@@ -95,6 +114,38 @@ export default function FolderPickerModal({
                   ))
                 )}
               </div>
+              {showNewFolder ? (
+                <div className="mb-2 flex items-center gap-2 rounded border border-neutral-700 bg-neutral-800/50 p-2">
+                  <input
+                    autoFocus
+                    type="text"
+                    value={newFolderName}
+                    onChange={(e) => setNewFolderName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") createFolder();
+                      else if (e.key === "Escape") setShowNewFolder(false);
+                    }}
+                    placeholder="New folder name"
+                    spellCheck={false}
+                    className="min-w-0 flex-1 rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-sm outline-none focus:border-blue-600"
+                  />
+                  <Button kind="primary" onClick={createFolder} disabled={!newFolderName.trim()}>
+                    Create
+                  </Button>
+                  <Button onClick={() => setShowNewFolder(false)}>Cancel</Button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => {
+                    setNewFolderName("");
+                    setShowNewFolder(true);
+                  }}
+                  className="mb-2 text-sm text-neutral-400 hover:text-neutral-200"
+                >
+                  ＋ New folder here
+                </button>
+              )}
+
               <div className="flex items-center justify-between gap-2">
                 <span className="truncate text-xs text-neutral-500" title={browse.path}>
                   {browse.path}

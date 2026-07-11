@@ -96,7 +96,10 @@ function isAllowedWsRequest(req: { headers: Record<string, unknown> }): boolean 
 app.addHook("onRequest", async (req, reply) => {
   if (!isAllowedWsRequest(req)) {
     reply.code(403).send({ error: "Cross-origin request refused" });
+    return;
   }
+  // API responses are live state — never let a browser cache them.
+  if (req.url.startsWith("/api/")) reply.header("Cache-Control", "no-store");
 });
 
 // In production (`npm run build` then `npm start`) the server also serves the

@@ -32,6 +32,9 @@ export async function api<T>(
   try {
     res = await fetch(url, {
       method: opts.method ?? "GET",
+      // The API is always live server state (folder listings, sessions, …) —
+      // never serve it from the browser cache, or you'd see stale folders.
+      cache: "no-store",
       headers: opts.body !== undefined ? { "content-type": "application/json" } : undefined,
       body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
     });
