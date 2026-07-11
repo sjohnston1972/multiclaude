@@ -406,6 +406,18 @@ export default function App() {
     [model, collectTerminalTabs, selectTab]
   );
 
+  const killAllFromList = useCallback(async () => {
+    try {
+      await api("/api/sessions", { method: "DELETE" });
+      if (model) {
+        collectTerminalTabs().forEach((t) => model.doAction(Actions.deleteTab(t.getId())));
+        persistLayout(model);
+      }
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }, [model, collectTerminalTabs, persistLayout]);
+
   // Full command list for the Ctrl-K palette: jump to any pane, reattach a
   // background session, or run any action.
   const paletteCommands = useMemo((): Command[] => {
@@ -474,18 +486,6 @@ export default function App() {
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
   }, [cycleTab]);
-
-  const killAllFromList = useCallback(async () => {
-    try {
-      await api("/api/sessions", { method: "DELETE" });
-      if (model) {
-        collectTerminalTabs().forEach((t) => model.doAction(Actions.deleteTab(t.getId())));
-        persistLayout(model);
-      }
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  }, [model, collectTerminalTabs, persistLayout]);
 
   // ---------------------------------------------------------------- factory
   const factory = useCallback(
