@@ -56,9 +56,22 @@ export default function Hero({
           <p className="font-mono text-sm text-neutral-600">loading recent workspaces…</p>
         ) : recent.length > 0 ? (
           <>
-            <p className="mb-2 font-mono text-[11px] uppercase tracking-widest text-neutral-600">
-              Recent workspaces
-            </p>
+            <div className="mb-2 flex items-center justify-between">
+              <p className="font-mono text-[11px] uppercase tracking-widest text-neutral-600">
+                Recent workspaces
+              </p>
+              <button
+                onClick={() => {
+                  api("/api/recent", { method: "DELETE" })
+                    .then(() => setRecent([]))
+                    .catch(() => {});
+                }}
+                className="font-mono text-[11px] text-neutral-600 hover:text-neutral-300"
+                title="Forget all recent workspaces"
+              >
+                clear history
+              </button>
+            </div>
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               {recent.map((w) => (
                 <button

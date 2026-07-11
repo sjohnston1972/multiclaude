@@ -3,6 +3,7 @@ import fastifyStatic from "@fastify/static";
 import { WebSocketServer, WebSocket } from "ws";
 import path from "node:path";
 import fs from "node:fs";
+import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { SessionManager } from "./sessionManager.js";
 import { readState, writeState, rememberFolder } from "./stateStore.js";
@@ -18,8 +19,19 @@ const HOST = process.env.MULTICLAUDE_HOST ?? "127.0.0.1";
 const PORT = Number(process.env.MULTICLAUDE_PORT ?? 3001);
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "::1", "localhost"]);
+const UNSAFE_HOST = process.env.MULTICLAUDE_UNSAFE_HOST === "1";
+
+/** This machine's own LAN IPv4/IPv6 addresses (for LAN access). */
+function ownAddresses(): string[] {
+  const addrs: string[] = [];
+  for (const ifaces of Object.values(os.networkInterfaces())) {
+    for (const i of ifaces ?? []) if (!i.internal) addrs.push(i.address.toLowerCase());
+  }
+  return addrs;
+}
+
 if (!LOOPBACK_HOSTS.has(HOST)) {
-  if (process.env.MULTICLAUDE_UNSAFE_HOST === "1") {
+  if (UNSAFE_HOST) {
     console.warn("");
     console.warn("############################################################");
     console.warn("##  WARNING: multiclaude is binding to a NON-LOOPBACK     ##");
@@ -44,20 +56,35 @@ const app = Fastify({ logger: false, bodyLimit: 25 * 1024 * 1024 });
 // ---------------------------------------------------------------------------
 // Cross-origin defence. Binding to loopback stops other machines, but NOT
 // other websites: a browser will happily open a cross-origin WebSocket, so a
-// malicious page you visit could otherwise connect to /ws and spawn a shell
-// on this machine. We therefore require the WS Origin to be one of our own
-// loopback origins (CLI tools send no Origin, which we allow), and the Host
-// header to be loopback (this also defeats DNS-rebinding attacks).
-const LOOPBACK_HOST_RE = /^(127\.0\.0\.1|localhost|\[?::1\]?)(:\d+)?$/i;
+// malicious page you visit could otherwise connect to /ws and spawn a shell.
+// We require both the Host header and (if present) the Origin to name an
+// address we actually answer on. By default that's loopback only. When LAN
+// access is deliberately enabled (MULTICLAUDE_UNSAFE_HOST=1) we also allow this
+// machine's own IPs and hostname — so a LAN browser at http://<lan-ip>:3001
+// works, while a DNS-rebinding attack (whose Host header carries a *domain*,
+// not one of our IPs) and plain cross-origin sites are still refused.
+const ALLOWED_HOSTS = new Set<string>(["127.0.0.1", "localhost", "::1"]);
+if (UNSAFE_HOST) {
+  for (const a of ownAddresses()) ALLOWED_HOSTS.add(a);
+  ALLOWED_HOSTS.add(os.hostname().toLowerCase());
+  if (!LOOPBACK_HOSTS.has(HOST)) ALLOWED_HOSTS.add(HOST.toLowerCase());
+}
+
+/** Extract the hostname from a Host header (`host:port`, `[::1]:port`). */
+function hostOf(hostHeader: string): string {
+  const h = hostHeader.trim().toLowerCase();
+  if (h.startsWith("[")) return h.slice(1, h.indexOf("]")); // [::1]:3001 → ::1
+  const colon = h.lastIndexOf(":");
+  return colon !== -1 && /^\d+$/.test(h.slice(colon + 1)) ? h.slice(0, colon) : h;
+}
 
 function isAllowedWsRequest(req: { headers: Record<string, unknown> }): boolean {
-  const host = String(req.headers["host"] ?? "");
-  if (!LOOPBACK_HOST_RE.test(host)) return false;
+  if (!ALLOWED_HOSTS.has(hostOf(String(req.headers["host"] ?? "")))) return false;
 
   const origin = req.headers["origin"];
   if (origin === undefined) return true; // non-browser client (test scripts, curl)
   try {
-    return LOOPBACK_HOST_RE.test(new URL(String(origin)).host);
+    return ALLOWED_HOSTS.has(new URL(String(origin)).hostname.toLowerCase());
   } catch {
     return false;
   }
@@ -109,6 +136,14 @@ app.get("/api/recent", async () => {
       name: path.basename(f) || f,
       isRepo: fs.existsSync(path.join(f, ".git")),
     }));
+});
+
+// Clear the recent-workspaces history shown on the home screen.
+app.delete("/api/recent", async () => {
+  const state = readState();
+  state.recentFolders = [];
+  writeState(state);
+  return { ok: true };
 });
 
 // Workspace restore: sessions that were alive when the server last stopped and
@@ -330,6 +365,13 @@ async function main() {
 
   console.log(`multiclaude server listening on http://${HOST}:${PORT}`);
   console.log(`shell: ${sessions.shellFriendly}`);
+  if (UNSAFE_HOST) {
+    console.log("reachable from your LAN at:");
+    for (const a of ownAddresses().filter((a) => a.includes("."))) {
+      console.log(`  http://${a}:${PORT}`);
+    }
+    console.log("(Windows Firewall may need an inbound rule allowing this port.)");
+  }
 }
 
 // Clean shutdown: kill child shells so we don't leave orphaned PowerShell

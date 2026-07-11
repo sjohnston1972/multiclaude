@@ -12,6 +12,24 @@ address. It also rejects any REST or WebSocket request whose browser origin
 isn't loopback, so a random website you visit can't reach in and spawn a
 shell through your browser. Never expose it through a tunnel or reverse proxy.
 
+## Reaching it from another PC on your LAN
+
+By default multiclaude is loopback-only. To let another machine on your network
+open it, run **`.\scripts\start-multiclaude-lan.ps1`** — it binds to all
+interfaces, prints your LAN URLs (e.g. `http://192.168.1.20:3001`), and (once,
+from an **admin** PowerShell) you may need to allow the port through the
+firewall:
+
+```
+New-NetFirewallRule -DisplayName "multiclaude LAN" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 3001 -Profile Private
+```
+
+⚠️ **This exposes a real shell on this PC to anyone who can reach the port —
+only do it on a network you trust.** Even in LAN mode, requests are still
+restricted to this machine's own addresses, so random websites and
+DNS-rebinding attacks are refused; but anyone who can load the LAN URL gets a
+shell. It is off unless you explicitly start it this way.
+
 ## Prerequisites
 
 - **Node.js 22 or newer** — https://nodejs.org
@@ -62,7 +80,8 @@ run the production version yourself: `npm run build` then `npm start`
 - **Home screen.** With no sessions open, multiclaude shows a home screen: a
   grid of **recent workspaces** you can click to drop straight back into a
   session there (it opens the folder and starts Claude), plus New session and
-  Blank shell. Close every tab and you're back at the home screen.
+  Blank shell. **Clear history** forgets the recent list. Close every tab and
+  you're back at the home screen.
 - **＋ New session** — start a terminal in a local folder (browse or pick a
   recent one), in a GitHub repo (cloned via `gh` into
   `~\multiclaude-workspaces\`), or as a blank shell. In the folder browser you
