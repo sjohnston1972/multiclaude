@@ -45,6 +45,7 @@ export default function App() {
   const [liveSessions, setLiveSessions] = useState<SessionInfo[]>([]);
   const [tabMenu, setTabMenu] = useState<{ x: number; y: number; tabId: string; sessionId: string } | null>(null);
   const [pickFolderFor, setPickFolderFor] = useState<{ tabId: string; sessionId: string } | null>(null);
+  const [lan, setLan] = useState<{ lan: boolean; lanUrls: string[] } | null>(null);
   const [dots, setDots] = useState<Record<string, boolean>>({});
   const lastSeenRef = useRef<Record<string, number>>({});
   const autoTitleRef = useRef<Record<string, string>>({});
@@ -559,6 +560,13 @@ export default function App() {
     [settings]
   );
 
+  // --------------------------------------------------------- LAN status once
+  useEffect(() => {
+    api<{ lan: boolean; lanUrls: string[] }>("/api/health")
+      .then((h) => setLan({ lan: h.lan, lanUrls: h.lanUrls }))
+      .catch(() => {});
+  }, []);
+
   // ------------------------------------------------------------------ toast
   useEffect(() => {
     if (!error) return;
@@ -591,6 +599,19 @@ export default function App() {
         <span className="mr-2 select-none text-sm font-semibold text-neutral-100">
           multi<span className="text-orange-400">claude</span>
         </span>
+        {lan?.lan && (
+          <span
+            onClick={() => setShowHealth(true)}
+            title={
+              "This server is exposed to your LAN — anyone who can reach it gets a shell on this PC.\n\nReachable at:\n" +
+              (lan.lanUrls.join("\n") || "(your LAN addresses)")
+            }
+            className="mr-2 flex cursor-pointer items-center gap-1 rounded border border-amber-600/60 bg-amber-950/60 px-2 py-0.5 text-xs font-medium text-amber-300 hover:bg-amber-900/60"
+          >
+            <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-amber-400" />
+            LAN exposed
+          </span>
+        )}
         <ToolbarButton onClick={() => setShowNew(true)} title="Open a new terminal session">
           ＋ New session
         </ToolbarButton>

@@ -7,6 +7,8 @@ interface Health {
   shell: string;
   pid: number;
   uptimeSeconds: number;
+  lan: boolean;
+  lanUrls: string[];
   sessions: SessionInfo[];
 }
 
@@ -53,6 +55,19 @@ export default function HealthModal({ onClose }: { onClose: () => void }) {
               <p className="font-medium">{fmtUptime(health.uptimeSeconds)}</p>
             </div>
           </div>
+          {health.lan && (
+            <div className="mb-3 rounded border border-amber-700/60 bg-amber-950/50 px-3 py-2 text-sm text-amber-200">
+              <p className="font-medium">⚠ Exposed to your LAN</p>
+              <p className="mt-0.5 text-xs text-amber-300/80">
+                Anyone who can reach this machine on your network gets a shell here. Reachable at:
+              </p>
+              <ul className="mt-1 font-mono text-xs text-amber-200">
+                {health.lanUrls.map((u) => (
+                  <li key={u}>{u}</li>
+                ))}
+              </ul>
+            </div>
+          )}
           {health.sessions.length === 0 ? (
             <p className="text-neutral-400">No sessions running.</p>
           ) : (

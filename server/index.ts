@@ -110,11 +110,21 @@ if (fs.existsSync(webDist)) {
 // REST API: sessions
 // ---------------------------------------------------------------------------
 
+// Whether the server is exposed beyond loopback (LAN mode), and where.
+const LAN_MODE = UNSAFE_HOST && !LOOPBACK_HOSTS.has(HOST);
+const LAN_URLS = LAN_MODE
+  ? ownAddresses()
+      .filter((a) => a.includes("."))
+      .map((a) => `http://${a}:${PORT}`)
+  : [];
+
 app.get("/api/health", async () => ({
   ok: true,
   shell: sessions.shellFriendly,
   pid: process.pid,
   uptimeSeconds: Math.round(process.uptime()),
+  lan: LAN_MODE,
+  lanUrls: LAN_URLS,
   sessions: sessions.list(),
 }));
 
