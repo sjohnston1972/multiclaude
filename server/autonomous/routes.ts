@@ -1,9 +1,11 @@
 import type { FastifyInstance } from "fastify";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { createTab, getTab, listTabs, relaunchTab, type CreateTabInput } from "./registry.js";
 import { hasBlockers } from "./loop.js";
 import { runPreflight } from "./preflight.js";
+import { prepareLaunch } from "./launch.js";
 
 /**
  * REST API for autonomous tabs. Follows multiclaude's envelope: on failure
@@ -53,6 +55,57 @@ export function registerAutonomousRoutes(app: FastifyInstance): void {
       return { error: "A project directory is required." };
     }
     return runPreflight(projectDir, Array.isArray(body.addDirs) ? body.addDirs : []);
+  });
+
+  // Full launch (R7): pre-flight gate → rollback tag + state dir + gitignore + UUID
+  // → start the supervisor. This is the real entry point the new-tab dialog uses.
+  app.post("/api/autonomous/launch", async (req, reply) => {
+    const body = (req.body ?? {}) as Partial<CreateTabInput> & { seedProgress?: boolean };
+    const taskName = (body.taskName ?? "").trim();
+    if (!/^[a-z0-9][a-z0-9-]*$/.test(taskName)) {
+      reply.code(400);
+      return { error: "Task name is required and must be kebab-case (letters, numbers, dashes)." };
+    }
+    const projectDir = (body.projectDir ?? "").trim();
+    try {
+      if (!projectDir || !fs.statSync(projectDir).isDirectory()) throw new Error();
+    } catch {
+      reply.code(400);
+      return { error: `Project directory doesn't exist: ${projectDir}` };
+    }
+
+    const addDirs = Array.isArray(body.addDirs) ? body.addDirs : [];
+    const pf = await runPreflight(projectDir, addDirs);
+    if (!pf.canLaunch) {
+      reply.code(400);
+      return { error: "Pre-flight has blocking (❌) checks — resolve them before launch.", preflight: pf };
+    }
+
+    const sessionId = crypto.randomUUID();
+    let launchTag: string;
+    try {
+      ({ launchTag } = prepareLaunch({
+        projectDir,
+        taskName,
+        sessionId,
+        seedProgress: body.seedProgress === true && pf.seedable,
+        now: Math.floor(Date.now() / 1000),
+      }));
+    } catch (err) {
+      reply.code(500);
+      return { error: `Launch setup failed: ${(err as Error).message}` };
+    }
+
+    return createTab({
+      taskName,
+      projectDir,
+      addDirs,
+      model: body.model,
+      budgetUsd: body.budgetUsd ?? null,
+      extraAllowRules: body.extraAllowRules,
+      sessionId,
+      launchTag,
+    });
   });
 
   app.get("/api/autonomous", async () => listTabs());
