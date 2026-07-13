@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { createTab, getTab, listTabs, relaunchTab, type CreateTabInput } from "./registry.js";
 import { hasBlockers } from "./loop.js";
+import { runPreflight } from "./preflight.js";
 
 /**
  * REST API for autonomous tabs. Follows multiclaude's envelope: on failure
@@ -41,6 +42,17 @@ export function registerAutonomousRoutes(app: FastifyInstance): void {
       extraAllowRules: body.extraAllowRules,
     });
     return record;
+  });
+
+  // Pre-flight validation for the new-tab dialog (R6). Gate Launch on canLaunch.
+  app.post("/api/autonomous/preflight", async (req, reply) => {
+    const body = (req.body ?? {}) as { projectDir?: string };
+    const projectDir = (body.projectDir ?? "").trim();
+    if (!projectDir) {
+      reply.code(400);
+      return { error: "A project directory is required." };
+    }
+    return runPreflight(projectDir);
   });
 
   app.get("/api/autonomous", async () => listTabs());
