@@ -61,17 +61,24 @@ dogfoods the discipline.
    a `PROGRESS.md`, and a temp `CLAUDE.md` carrying the discipline block, run the pinned invocation
    once and assert a commit landed. Files: `scripts/claude-invoke-test.mjs` (+ `scripts/_stub/`
    fixtures if needed).
-   **Verify:** `node scripts/claude-invoke-test.mjs` → `ALL PASS` — `git -C <tmp> log --oneline`
-   shows exactly one new commit and `hello.txt` exists. If it fails, the script prints which fallback
-   rung (`Bash(git *)` scope → broaden → `--dangerously-skip-permissions`) was needed.
+   **Verify:** `node scripts/claude-invoke-test.mjs` → `ALL PASS` — a rung lands ≥1 commit that
+   *tracks* `hello.txt` containing `hi` (asserted via `git ls-files`, since the discipline may also
+   commit PROGRESS.md/DONE). If a rung fails it escalates (`Bash(git *)` scope → blanket `Bash` →
+   `--dangerously-skip-permissions`) and prints the winning rung.
    **Commit:** `test: pin claude headless invocation that lands a commit (fixes B2)`.
+   **DONE (2026-07-13):** PASS on **Rung A** (`acceptEdits` + scoped `Bash(git *) Bash(npm *)
+   Bash(npx *) Bash(node *)`), $0.23, no escalation. A denied `xxd` surfaced in `permission_denials`
+   without hanging (confirms B3). Use Rung A as the pinned permission strategy from Step 2 on.
 
 2. **`AutonomousManager` skeleton + fake-claude stub.** Add a manager that spawns a configurable
    command (defaults to `claude`, overridable so tests point at a stub), tracks `state`
    (`preflight|running|sleeping|blocked|done|error`), holds an in-memory event ring buffer +
-   listener set (mirroring `SessionManager`), and exposes `start()` / `stop()`. Add
-   `scripts/_stub/fake-claude.mjs` emitting scripted `stream-json` then exiting 0. Files:
-   `server/autonomous/manager.ts`, `server/autonomous/types.ts`, `scripts/_stub/fake-claude.mjs`.
+   listener set (mirroring `SessionManager`), and exposes `start()` / `stop()`. Spawn the child with
+   **stdin ignored** (`stdio: ["ignore", "pipe", "pipe"]`) — the Step 1 spike showed `claude` stalls
+   ~3s each turn waiting on stdin otherwise, which would read as B1-style silence. Pin the Rung A
+   permission strategy from Step 1. Add `scripts/_stub/fake-claude.mjs` emitting scripted
+   `stream-json` then exiting 0. Files: `server/autonomous/manager.ts`, `server/autonomous/types.ts`,
+   `scripts/_stub/fake-claude.mjs`.
    **Verify:** `npx tsx scripts/manager-spawn-test.ts` → `ALL PASS` — start against the stub,
    observe `state` go `running → done` and ≥1 event buffered.
    **Commit:** `feat: AutonomousManager skeleton spawning claude via child_process`.
