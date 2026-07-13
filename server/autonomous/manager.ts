@@ -2,20 +2,23 @@ import { spawn, execFile, type ChildProcess } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import readline from "node:readline";
 import type { AutonomousConfig, AutonomousEvent, AutonomousState } from "./types.js";
 import { hasBlockers, isUsageLimit, parseResetTime } from "./loop.js";
+import { parseStream, type ParsedEvent } from "./streamParse.js";
+import { renderEvent } from "./renderEvent.js";
+import { extractStep, parseGitLogLine, type StatusStrip } from "./status.js";
 
 /**
  * AutonomousManager owns one autonomous run's `claude` child process, the way
- * SessionManager owns a pty: the server holds the process, parses its output,
- * buffers recent events for replay, and fans them out to attached viewers.
+ * SessionManager owns a pty: the server holds the process, parses its stream-json
+ * output server-side into render-ready events, buffers them for replay, derives
+ * the R2 status strip, and fans everything out to attached viewers.
  *
  * The supervisor loop (R8): re-read state files, invoke claude (--session-id on
  * the first call, --resume after), sleep 10s and loop on exit 0, sleep-until-reset
- * on a usage limit, error out otherwise, and stop when a DONE file appears. Before
- * every invocation it checks that PLAN.md/PROGRESS.md are still readable — the
- * discipline applied to the supervisor itself: never invoke into a void.
+ * on a usage limit, error otherwise, stop when a DONE file appears. Before every
+ * invocation it checks PLAN.md/PROGRESS.md are still readable — never invoke into
+ * a void.
  */
 
 const EVENT_BUFFER_LIMIT = 2000; // most-recent N events kept for replay on reattach
@@ -68,9 +71,7 @@ function killTree(pid: number): void {
 
 export class AutonomousManager {
   readonly sessionId: string;
-  /** Epoch ms we intend to wake from a usage-limit sleep (null unless sleeping). */
   wakeAt: number | null = null;
-  /** Human-readable reason for the last error/blocked stop (null otherwise). */
   lastError: string | null = null;
 
   private state: AutonomousState = "preflight";
@@ -86,6 +87,13 @@ export class AutonomousManager {
   private delayTimer: ReturnType<typeof setTimeout> | null = null;
   private resumeTimer: ReturnType<typeof setTimeout> | null = null;
 
+  // --- status-strip fields (R2) ---
+  private readonly startedAt = Date.now();
+  private turnStartAt: number | null = null;
+  private currentStep: string | null = null;
+  private lastCommit: { sha: string; subject: string } | null = null;
+  private costUsd = 0;
+
   constructor(private config: AutonomousConfig) {
     // Pin a UUID at construction so it survives resets and process restarts (spec 3.2).
     this.sessionId = config.sessionId ?? crypto.randomUUID();
@@ -95,9 +103,23 @@ export class AutonomousManager {
     return this.state;
   }
 
-  /** A snapshot copy of the buffered events (for replay on WebSocket attach). */
   getEvents(): AutonomousEvent[] {
     return this.events.slice();
+  }
+
+  /** The R2 status strip snapshot. */
+  getStatus(): StatusStrip {
+    return {
+      state: this.state,
+      sessionId: this.sessionId,
+      currentStep: this.currentStep,
+      lastCommit: this.lastCommit,
+      costUsd: this.costUsd,
+      turnElapsedMs: this.state === "running" && this.turnStartAt ? Date.now() - this.turnStartAt : 0,
+      totalElapsedMs: Date.now() - this.startedAt,
+      wakeAt: this.wakeAt,
+      lastError: this.lastError,
+    };
   }
 
   onEvent(fn: (ev: AutonomousEvent) => void): () => void {
@@ -116,13 +138,18 @@ export class AutonomousManager {
   }
 
   private pushEvent(kind: string, payload: unknown): void {
-    const ev: AutonomousEvent = { seq: this.seq++, kind, payload, at: Date.now() };
+    const ev: AutonomousEvent = {
+      seq: this.seq++,
+      kind,
+      payload,
+      rendered: renderEvent({ kind, payload }),
+      at: Date.now(),
+    };
     this.events.push(ev);
     if (this.events.length > EVENT_BUFFER_LIMIT) this.events.shift();
     for (const l of this.eventListeners) l(ev);
   }
 
-  /** Start (or restart) the supervisor loop. */
   async start(): Promise<void> {
     if (this.looping) return;
     this.stopped = false;
@@ -132,36 +159,34 @@ export class AutonomousManager {
 
   private async loop(): Promise<void> {
     while (!this.stopped) {
-      // 1. Task complete? DONE + Blockers → blocked; DONE alone → done.
       if (fs.existsSync(path.join(this.config.cwd, "DONE"))) {
         this.setState(this.blockersPresent() ? "blocked" : "done");
         break;
       }
-      // 2. Integrity guard — never invoke if the ground truth is gone.
       const problem = this.stateFileProblem();
       if (problem) {
         this.lastError = problem;
         this.setState("error");
         break;
       }
-      // 3. One invocation.
       this.setState("running");
       this.turnText = "";
+      this.turnStartAt = Date.now();
       const resume = this.invoked;
       this.invoked = true;
       const { code } = await this.invokeOnce(resume);
+      await this.reconcileLastCommit(); // turn boundary — decisions Q2
       if (this.stopped) return;
 
       if (code === 0) {
         await this.delay(this.config.turnDelayMs ?? DEFAULT_TURN_DELAY_MS);
         continue;
       }
-      // Non-zero exit: usage limit → sleep until reset; else error.
       if (isUsageLimit(this.turnText)) {
         this.wakeAt = parseResetTime(this.turnText, Date.now()) + Math.floor(Math.random() * RESET_JITTER_MS);
         this.setState("sleeping");
         this.scheduleResume();
-        return; // the resume timer re-enters loop()
+        return;
       }
       this.lastError = `claude exited with code ${code}`;
       this.setState("error");
@@ -170,7 +195,6 @@ export class AutonomousManager {
     this.looping = false;
   }
 
-  /** null if PLAN.md and PROGRESS.md are both readable, else a reason naming the offending file. */
   private stateFileProblem(): string | null {
     for (const name of ["PLAN.md", "PROGRESS.md"]) {
       const p = path.join(this.config.cwd, name);
@@ -191,6 +215,24 @@ export class AutonomousManager {
     }
   }
 
+  /** Reconcile last-commit from git (decisions Q2 — event-driven, at the turn boundary, not a timer). */
+  private reconcileLastCommit(): Promise<void> {
+    return new Promise((resolve) => {
+      execFile(
+        "git",
+        ["-C", this.config.cwd, "log", "-1", "--format=%h %s"],
+        { timeout: 5000, windowsHide: true },
+        (err, stdout) => {
+          if (!err) {
+            const parsed = parseGitLogLine(stdout);
+            if (parsed) this.lastCommit = parsed;
+          }
+          resolve();
+        }
+      );
+    });
+  }
+
   private delay(ms: number): Promise<void> {
     return new Promise((resolve) => {
       this.delayTimer = setTimeout(resolve, ms);
@@ -207,7 +249,6 @@ export class AutonomousManager {
     }, ms);
   }
 
-  /** Spawn one `claude` invocation, streaming its stream-json into the ring buffer. Resolves with the exit code. */
   private invokeOnce(resume: boolean): Promise<{ code: number }> {
     return new Promise((resolve) => {
       const { command, args } = this.config.spawn ?? {
@@ -229,8 +270,8 @@ export class AutonomousManager {
       }
       this.child = child;
 
-      const rl = readline.createInterface({ input: child.stdout!, crlfDelay: Infinity });
-      rl.on("line", (line) => this.ingestLine(line));
+      // Robust newline framing (streamParse / decisions Q3) — no hand-rolled buffer.
+      void parseStream(child.stdout!, (ev) => this.ingest(ev));
       child.stderr!.on("data", (d) => {
         const s = d.toString();
         this.pushEvent("stderr", { text: s });
@@ -249,24 +290,23 @@ export class AutonomousManager {
     });
   }
 
-  private ingestLine(line: string): void {
-    if (!line.trim()) return;
-    try {
-      const ev = JSON.parse(line) as { type?: unknown; message?: { content?: unknown } };
-      const kind = typeof ev.type === "string" ? ev.type : "unknown";
-      this.pushEvent(kind, ev);
-      // Accumulate human-visible text for usage-limit detection.
-      if (kind === "assistant" && Array.isArray(ev.message?.content)) {
-        for (const c of ev.message!.content as Array<{ type?: string; text?: string }>) {
-          if (c.type === "text" && typeof c.text === "string") this.turnText += " " + c.text;
+  private ingest(ev: ParsedEvent): void {
+    this.pushEvent(ev.kind, ev.payload);
+
+    const p = ev.payload as { message?: { content?: Array<Record<string, unknown>> }; total_cost_usd?: number };
+    if (ev.kind === "assistant" && Array.isArray(p.message?.content)) {
+      for (const c of p.message!.content!) {
+        if (c.type === "text" && typeof c.text === "string") {
+          this.turnText += " " + c.text;
+          const step = extractStep(c.text);
+          if (step) this.currentStep = step;
         }
-      } else if (kind === "result") {
-        this.turnText += " " + line;
       }
-    } catch {
-      // Never drop a line — surface it as a raw event (decisions Q3). Step 4 formalizes this.
-      this.pushEvent("raw", { line });
-      this.turnText += " " + line;
+    } else if (ev.kind === "result") {
+      this.turnText += " " + JSON.stringify(ev.payload);
+      if (typeof p.total_cost_usd === "number") this.costUsd += p.total_cost_usd;
+    } else if (ev.kind === "raw") {
+      this.turnText += " " + (p as unknown as { line?: string }).line;
     }
   }
 

@@ -28,6 +28,8 @@ export interface AutonomousEvent {
   kind: string;
   /** The parsed JSON payload, or `{ line }` / `{ text }` / `{ message }` for non-JSON kinds. */
   payload: unknown;
+  /** Human-readable render of this event (R3) — icon + summary lines; may be empty. */
+  rendered: { icon: string; summary: string }[];
   /** ms since epoch when observed. */
   at: number;
 }
