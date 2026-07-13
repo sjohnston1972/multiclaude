@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import fs from "node:fs";
 import path from "node:path";
-import { createTab, getTab, listTabs, type CreateTabInput } from "./registry.js";
+import { createTab, getTab, listTabs, relaunchTab, type CreateTabInput } from "./registry.js";
 import { hasBlockers } from "./loop.js";
 
 /**
@@ -48,6 +48,18 @@ export function registerAutonomousRoutes(app: FastifyInstance): void {
   app.get("/api/autonomous/:id", async (req, reply) => {
     const { id } = req.params as { id: string };
     const record = getTab(id);
+    if (!record) {
+      reply.code(404);
+      return { error: "No such autonomous tab." };
+    }
+    return record;
+  });
+
+  // Relaunch a persisted/stopped run with its pinned UUID (R9). --resume continues
+  // the conversation rather than restarting.
+  app.post("/api/autonomous/:id/relaunch", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const record = relaunchTab(id);
     if (!record) {
       reply.code(404);
       return { error: "No such autonomous tab." };

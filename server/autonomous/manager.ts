@@ -125,6 +125,8 @@ export class AutonomousManager {
   constructor(private config: AutonomousConfig) {
     // Pin a UUID at construction so it survives resets and process restarts (spec 3.2).
     this.sessionId = config.sessionId ?? crypto.randomUUID();
+    // A relaunch resumes an existing session, so the first call must use --resume.
+    this.invoked = config.startResumed ?? false;
   }
 
   getState(): AutonomousState {

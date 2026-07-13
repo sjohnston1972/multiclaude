@@ -46,6 +46,8 @@ export interface AutonomousConfig {
   sessionId?: string;
   /** Pause between successful turns, ms (default 10 000). Tests set it small. */
   turnDelayMs?: number;
+  /** Relaunch of an existing session: the first call uses --resume, not --session-id. */
+  startResumed?: boolean;
   /** Model alias, default `sonnet`. */
   model?: string;
   /** Extra directories granted via `--add-dir` (fixes B4). */
@@ -81,4 +83,6 @@ export interface AutonomousRecord {
   lastTurnAt: number | null;
   costUsd: number;
   lastError: string | null;
+  /** True when the supervisor isn't live (loaded from disk / stopped) — offer a relaunch. */
+  relaunchable?: boolean;
 }

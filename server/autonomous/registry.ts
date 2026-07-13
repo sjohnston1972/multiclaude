@@ -56,9 +56,9 @@ function dto(id: string): AutonomousRecord | undefined {
   const r = records.get(id);
   if (!r) return undefined;
   const m = managers.get(id);
-  if (!m) return { ...r };
+  if (!m) return { ...r, relaunchable: true };
   const s = m.getStatus();
-  return { ...r, state: s.state, currentStep: s.currentStep, costUsd: s.costUsd, lastError: s.lastError };
+  return { ...r, state: s.state, currentStep: s.currentStep, costUsd: s.costUsd, lastError: s.lastError, relaunchable: false };
 }
 
 export function createTab(input: CreateTabInput): AutonomousRecord {
@@ -107,6 +107,41 @@ export function createTab(input: CreateTabInput): AutonomousRecord {
 
 export function listTabs(): AutonomousRecord[] {
   return [...records.keys()].map((id) => dto(id)!).filter(Boolean);
+}
+
+/**
+ * Relaunch a persisted (or stopped) run, reusing its pinned UUID so the
+ * conversation *continues* via --resume rather than restarting (R9). No-op if the
+ * supervisor is already live.
+ */
+export function relaunchTab(id: string): AutonomousRecord | undefined {
+  const record = records.get(id);
+  if (!record) return undefined;
+  const existing = managers.get(id);
+  if (existing && (existing.getState() === "running" || existing.getState() === "sleeping")) {
+    return dto(id); // already live — nothing to do
+  }
+  const manager = new AutonomousManager({
+    cwd: record.projectDir,
+    model: record.model,
+    addDirs: record.addDirs,
+    budgetUsd: record.budgetUsd ?? undefined,
+    extraAllowRules: record.extraAllowRules,
+    sessionId: record.sessionId, // reuse the pinned UUID → --resume continues the conversation
+    startResumed: true,
+    spawn: spawnOverride ?? undefined,
+  });
+  managers.set(id, manager);
+  manager.onState((s) => {
+    record.state = s;
+    record.lastTurnAt = Date.now();
+    record.lastError = manager.lastError;
+    persist();
+  });
+  void manager.start();
+  record.state = manager.getState();
+  persist();
+  return dto(id);
 }
 
 export function getTab(id: string): AutonomousRecord | undefined {
