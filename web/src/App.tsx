@@ -19,6 +19,7 @@ import {
   tabJson,
 } from "./layoutReconcile";
 import TerminalPane from "./TerminalPane";
+import AutonomousTab from "./AutonomousTab";
 import SessionListModal from "./SessionListModal";
 import NewSessionDialog from "./NewSessionDialog";
 import SettingsModal from "./SettingsModal";
@@ -554,6 +555,10 @@ export default function App() {
             scrollback={settings.scrollback}
           />
         );
+      }
+      if (node.getComponent() === "autonomous") {
+        const cfg = (node.getConfig() ?? {}) as { tabId: string; taskName?: string };
+        return <AutonomousTab tabId={cfg.tabId} taskName={cfg.taskName} node={node} />;
       }
       return null;
     },
