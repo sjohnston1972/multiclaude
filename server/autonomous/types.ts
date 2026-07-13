@@ -57,3 +57,28 @@ export interface AutonomousConfig {
   /** Test seam: run this command+args verbatim instead of the real `claude` invocation. */
   spawn?: { command: string; args: string[] };
 }
+
+/**
+ * A persisted, first-class autonomous tab (R9). Static fields are set at creation;
+ * live fields (state, currentStep, costUsd, lastError, lastTurnAt) are refreshed
+ * from the manager's status strip whenever the tab is read.
+ */
+export interface AutonomousRecord {
+  id: string;
+  taskName: string;
+  projectDir: string;
+  addDirs: string[];
+  model: string;
+  budgetUsd: number | null;
+  extraAllowRules: string;
+  /** Pinned session UUID — resume survives resets and restarts (spec 3.2). */
+  sessionId: string;
+  /** Rollback tag created at launch (R7); null until launched (Step 15). */
+  launchTag: string | null;
+  state: AutonomousState;
+  currentStep: string | null;
+  startedAt: number;
+  lastTurnAt: number | null;
+  costUsd: number;
+  lastError: string | null;
+}

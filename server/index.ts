@@ -9,6 +9,7 @@ import { SessionManager } from "./sessionManager.js";
 import { readState, writeState, rememberFolder } from "./stateStore.js";
 import { registerLauncherRoutes } from "./launcher.js";
 import { pruneOldImages, registerImageRoutes } from "./images.js";
+import { registerAutonomousRoutes } from "./autonomous/routes.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -284,6 +285,7 @@ app.delete("/api/sessions/:id", async (req, reply) => {
 
 registerLauncherRoutes(app);
 registerImageRoutes(app);
+registerAutonomousRoutes(app);
 pruneOldImages();
 // Prune again daily so a long-running (autostarted) server doesn't hoard images.
 setInterval(pruneOldImages, 24 * 60 * 60 * 1000).unref();
