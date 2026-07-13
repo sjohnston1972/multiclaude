@@ -38,7 +38,9 @@ function seedRepo(withProgress = true) {
 const goodMd = path.join(os.tmpdir(), `mc-launch-md-${process.pid}.md`);
 fs.writeFileSync(goodMd, "## Autonomous run discipline\n\n1. rules\n");
 process.env.MULTICLAUDE_CLAUDE_MD = goodMd;
-process.env.STUB_SCENARIO = "done";
+// "ok" stub writes no files, so the post-launch clean-tree check reflects
+// prepareLaunch's result rather than racing the run's first DONE write.
+process.env.STUB_SCENARIO = "ok";
 process.env.MULTICLAUDE_AUTONOMOUS_FILE = path.join(os.tmpdir(), `mc-launch-records-${process.pid}.json`);
 __setSpawnOverride({ command: process.execPath, args: [stub] });
 
