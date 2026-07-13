@@ -209,13 +209,41 @@ veto.
 
 3. **The exact flag combination that makes non-interactive `git commit` succeed (B2) must be pinned
    by a live test before anything else is built.** `--permission-mode acceptEdits` auto-accepts
-   *edits* but Bash still needs an allow-rule; in `-p` mode an unmet prompt is a silent hang/deny —
-   that's B2. `--allowedTools` supports scoped `Bash(git *)`. The plan's **Step 1 is a spike** whose
-   only pass condition is "a real commit landed in a throwaway repo," with a documented fallback
-   ladder (`acceptEdits` + `allowedTools "Bash(git *) Bash(npm *) …"` → broaden scope → last-resort
-   `--dangerously-skip-permissions`). I will not build the manager until that invocation is proven.
+   *edits* but Bash still needs an allow-rule — that's B2. `--allowedTools` supports scoped
+   `Bash(git *)`. (Correction, per Steven's 2026-07-13 verification: a denied Bash command does **not**
+   hang — it lands in the result JSON's `permission_denials` array and Claude reports it. Denials
+   surface; they don't stall. So the tight scope is the safe default, not a hang risk.) The plan's
+   **Step 1 is a spike** whose only pass condition is "a real commit landed in a throwaway repo,"
+   with a documented fallback ladder (`acceptEdits` + scoped `allowedTools` → broaden scope →
+   last-resort `--dangerously-skip-permissions`). I will not build the manager until that invocation
+   is proven.
 
 4. **Server-side parsing + per-tab event ring buffer** (not client-side JSON parsing). Forced by Q1
    and Q3: the supervisor already parses stream-json to run the loop, so it renders R3 events
    server-side and buffers them for WebSocket replay — identical to `SessionManager`'s scrollback.
    The browser receives ready-to-render event objects, never raw JSON (except via the debug toggle).
+
+---
+
+## Resolutions (2026-07-13, Steven) — supersedes the flags above
+
+Every `[NEEDS YOUR CALL]` in this document is now answered. Recorded so nothing is left open.
+
+- **max-turns (cross-cutting #1):** **dropped.** Steven confirmed it's absent from v2.1.207 in both
+  top-level and print-mode help. Spec `autonomous-tab.md` R1 field and R8 line removed;
+  `--max-budget-usd` is the only hard per-invocation cap.
+- **Windows Pause/Kill (cross-cutting #2):** **confirmed as proposed.** Pause = stop loop + taskkill
+  current (resumable); Kill = taskkill + mark inconsistent + warn.
+- **Bash scope (cross-cutting #3):** **scoped default + one editable field.** Default
+  `Bash(git *) Bash(npm *) Bash(npx *) Bash(node *)`; one free-text "Extra Bash allow-rules" field in
+  the new-tab dialog widens it. Denials surface via `permission_denials`, so tight scope is safe.
+- **Q3 oversized-line cap:** proceeding with my default — **cap a single line at 25 MB** (matching the
+  server `bodyLimit`) and emit a `raw` + warning above it. Not separately vetoed; revisit only if a
+  real event legitimately exceeds it.
+- **Q4 `.ccrun` retirement:** **retired, no migration.** `.multiclaude/<task-name>/` is the state dir;
+  no existing `.ccrun/` dirs need carrying forward.
+- **Discipline heading-match (Q4-adjacent / plan Step 13):** pre-flight ensures the *heading* exists
+  and never overwrites a shorter live version.
+- **New guard added at Steven's request:** a **state-file integrity check** at each turn boundary —
+  if `PLAN.md`/`PROGRESS.md` go missing or unreadable mid-run, the supervisor stops with `state =
+  error` and the reason, instead of invoking Claude into a void. Folded into plan Step 3.

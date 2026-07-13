@@ -38,9 +38,17 @@ dogfoods the discipline.
   holds only the pinned session UUID (see decisions Q4).
 - **Claude invocation (pinned, per decisions cross-cutting #1 & #3):** `-p`, `--session-id <uuid>`
   first call then `--resume <uuid>`, `--output-format stream-json`, `--include-partial-messages`,
-  `--verbose`, `--allowedTools` including a git-capable Bash rule, `--permission-mode acceptEdits`,
-  `--add-dir <each>`, `--model <configured>`, optional `--max-budget-usd`. **No `--max-turns`** — it
-  does not exist in the installed CLI (v2.1.207); see Blockers.
+  `--verbose`, `--permission-mode acceptEdits`, `--add-dir <each>`, `--model <configured>`, optional
+  `--max-budget-usd`, and `--allowedTools` defaulting to the scoped set
+  `Read Edit Write Glob Grep Bash(git *) Bash(npm *) Bash(npx *) Bash(node *)`, widened by the R1
+  "Extra Bash allow-rules" free-text field. **No `--max-turns`** — it does not exist in the installed
+  CLI (v2.1.207, top-level and print-mode help); the one-step-per-turn bound comes from the R10
+  prompt + discipline block. A denied Bash command surfaces in the result JSON's `permission_denials`
+  array (it does not hang the run), so the tight default scope is safe.
+- **Autonomous range:** Step 1 and Step 19 are `[LIVE]` — Steven runs them interactively (Step 1 is a
+  fallback-ladder spike needing human judgment; Step 19 spends real tokens). **Steps 2–18 are the
+  unattended-autonomous range** — all deterministic (fake-claude stub), safe to run one-per-turn
+  without a human present.
 - **Branch policy:** all work on `feat/autonomous-tab` (this feature's branch). Conventional commits,
   one commit per step. Never commit with a failing `npm run build`.
 
@@ -48,7 +56,7 @@ dogfoods the discipline.
 
 ## Phase 1 — Backend supervisor (process lifecycle)
 
-1. **Pin the claude invocation (spike). [LIVE]** Prove B2/R8 before building anything: in a throwaway
+1. **Pin the claude invocation (spike). [LIVE — Steven runs interactively]** Prove B2/R8 before building anything: in a throwaway
    temp git repo seeded with a one-step `PLAN.md` ("create `hello.txt` containing `hi`, commit"),
    a `PROGRESS.md`, and a temp `CLAUDE.md` carrying the discipline block, run the pinned invocation
    once and assert a commit landed. Files: `scripts/claude-invoke-test.mjs` (+ `scripts/_stub/`
@@ -68,15 +76,20 @@ dogfoods the discipline.
    observe `state` go `running → done` and ≥1 event buffered.
    **Commit:** `feat: AutonomousManager skeleton spawning claude via child_process`.
 
-3. **Supervisor loop.** Implement the R8 loop over the manager: check for `DONE` (→ `done`, exit);
-   exit 0 → sleep 10s → re-invoke with `--resume`; exit ≠ 0 → if stderr/stream matches
-   `/hit your (session|weekly) limit/` parse reset time → `sleeping` until reset + jitter, else
-   `error` + retain last 20 events. First call uses `--session-id`, subsequent `--resume`. Files:
-   `server/autonomous/manager.ts`, `server/autonomous/loop.ts`.
+3. **Supervisor loop + state-file integrity guard.** Implement the R8 loop over the manager: check
+   for `DONE` (→ `done`, exit); exit 0 → sleep 10s → re-invoke with `--resume`; exit ≠ 0 → if
+   stderr/stream matches `/hit your (session|weekly) limit/` parse reset time → `sleeping` until
+   reset + jitter, else `error` + retain last 20 events. First call uses `--session-id`, subsequent
+   `--resume`. **Integrity guard (before every re-invocation):** if `PLAN.md` is missing/unreadable
+   or `PROGRESS.md` is missing/unreadable, do **not** invoke into the void — set `state = error`,
+   record the exact file + reason, stop the loop. This is the discipline applied to the supervisor
+   itself: never keep marching when the ground truth is gone. Files: `server/autonomous/manager.ts`,
+   `server/autonomous/loop.ts`.
    **Verify:** `npx tsx scripts/loop-test.ts` → `ALL PASS` — stub emits (a) a limit message + exit 1
    → asserts `state==="sleeping"` and a computed wake time; (b) writes `DONE` + exit 0 → asserts
-   `state==="done"` and the loop stopped.
-   **Commit:** `feat: supervisor loop — resume, usage-limit sleep, DONE detection`.
+   `state==="done"` and the loop stopped; (c) delete `PLAN.md` between turns → asserts `state==="error"`,
+   a reason naming `PLAN.md`, and **no** further invocation of the stub.
+   **Commit:** `feat: supervisor loop — resume, usage-limit sleep, DONE + state-file integrity guard`.
 
 ## Phase 2 — Event parsing (stream-json → rendered events)
 
@@ -129,6 +142,10 @@ dogfoods the discipline.
    `web/src/AutonomousTab.tsx`, `web/src/App.tsx`.
    **Verify:** `npm run build` exits 0 and `web/dist/index.html` exists (tsc + vite compile the
    component and its wiring).
+   **Human check (build ≠ working):** open an autonomous tab in the browser and confirm with your
+   eyes that the status strip shows a live state badge, a non-blank current step, and a ticking
+   elapsed time, and that event lines actually scroll in as the stub/real run emits them — a strip
+   that renders blank would still pass the build gate.
    **Commit:** `feat: Autonomous tab UI — status strip + live event log (R2, R3)`.
 
 10. **Side pane: live state files.** R4 right-hand pane: `PROGRESS.md` live (markdown-rendered,
@@ -139,6 +156,11 @@ dogfoods the discipline.
     **Verify:** `node scripts/autonomous-files-test.mjs` → `ALL PASS` — endpoint returns both files'
     contents and `blockersPresent:true` when PROGRESS.md contains a `## Blockers` section; then
     `npm run build` exits 0.
+    **Human check (build ≠ working):** with a run whose PROGRESS.md has a `## Blockers` section open,
+    confirm with your eyes that the Blockers banner is visibly prominent (accent colour, not buried),
+    that PROGRESS.md re-renders when the file changes on disk, and that PLAN.md highlights the current
+    step — the endpoint test proves the data, not that the most important signal in the feature is
+    actually eye-catching.
     **Commit:** `feat: side pane — live PROGRESS.md/PLAN.md with Blockers banner (R4)`.
 
 ## Phase 4 — State persistence
@@ -206,12 +228,18 @@ dogfoods the discipline.
 ## Phase 7 — Onboarding & templates
 
 17. **New-tab Autonomous option + first-run onboarding.** Add an "Autonomous" choice to the new-tab
-    flow with the R1 fields (project dir, task name, PLAN.md detect, additional dirs, model, budget)
-    and an embedded pre-flight panel that gates Launch (disabled on any `fail`; each `warn` needs an
+    flow with the R1 fields (project dir, task name, PLAN.md detect, additional dirs, model, budget
+    cap, extra Bash allow-rules — **no** "max turns" field) and an embedded pre-flight panel that
+    gates Launch (disabled on any `fail`; each `warn` needs an
     "I accept this risk" checkbox). Add the one-time R11 onboarding modal (dismissable, re-openable
     from a help icon). Files: `web/src/AutonomousNewDialog.tsx`, `web/src/AutonomousOnboarding.tsx`,
     `web/src/NewSessionDialog.tsx`.
     **Verify:** `npm run build` exits 0 and `web/dist/index.html` exists.
+    **Human check (build ≠ working):** open the new-tab Autonomous flow and confirm with your eyes
+    that the pre-flight panel actually renders ✅/⚠️/❌ rows, that Launch is genuinely disabled while a
+    ❌ is present and only enables once each ⚠️ has its "I accept this risk" box ticked, and that the
+    first-run onboarding modal appears then stays dismissed. Gating logic that compiles but doesn't
+    disable the button would still pass the build.
     **Commit:** `feat: Autonomous new-tab dialog with gated pre-flight + onboarding (R1, R11)`.
 
 18. **Project scaffold / templates.** R12: `POST /api/autonomous/scaffold` writes `PLAN.md` from the
@@ -247,46 +275,35 @@ straight into the code (spec rule: no feature creep).
 
 ---
 
-## Blockers
+## Resolved decisions (2026-07-13, Steven)
 
-Sharp questions I would rather have answered than guess. Each names the exact thing at issue.
+All five plan-time blockers were answered before build. Recorded here so the plan is self-consistent
+and the next reader inherits the decision, not the open question.
 
-1. **`--max-turns` is gone (hard blocker for R1 + R8).** The installed `claude` CLI (v2.1.207) has
-   no `--max-turns` flag (confirmed via `claude --help`). Spec R1's "Max turns per invocation —
-   default 60" field and R8's `--max-turns <configured>` line cannot be implemented as written. My
-   recommendation (decisions cross-cutting #1): **remove the field**, rely on the R10 prompt +
-   discipline block to keep each turn to one step, and keep `--max-budget-usd` as the only hard
-   per-invocation cap. **Confirm I should drop the field**, or tell me the substitute you want (e.g.
-   a stop-hook that halts after one commit).
+1. **`--max-turns` — dropped.** Confirmed absent from the installed CLI (v2.1.207) in both top-level
+   and print-mode help; `--max-budget-usd` confirmed present. The R1 "Max turns" field and the R8
+   `--max-turns` line are removed from `autonomous-tab.md` (done in this same change). `--max-budget-usd`
+   is the only hard per-invocation cap; the one-step-per-turn bound comes from the R10 prompt +
+   discipline block.
 
-2. **R5's SIGTERM/SIGKILL wording doesn't exist on Windows.** `child.kill('SIGTERM')` is a hard kill
-   on Windows and the codebase deliberately uses `taskkill /T /F` instead. So Pause and Kill are
-   both hard tree-kills that differ only in intent/messaging (decisions cross-cutting #2). This is
-   safe because an unfinished turn hasn't committed. **Confirm** Pause = "stop the loop + taskkill
-   current, resumable" and Kill = "taskkill + mark inconsistent" is the behaviour you want, versus
-   expecting a genuine graceful-drain (which the platform can't give).
+2. **Windows Pause/Kill — confirmed as proposed.** Pause = stop the loop + `taskkill /T /F` the
+   current turn (resumable via `--resume`, which re-reads the state files and redoes the uncommitted
+   step). Kill = same tree-kill + mark state inconsistent + warn. No graceful-drain is possible on
+   Windows and none is needed, because an unfinished turn hasn't committed.
 
-3. **Which `--allowedTools` scope for Bash?** R8 accepts either blanket `Bash` or scoped
-   (`Bash(git *)`, `Bash(npm *)`, `Bash(npx *)`). The tighter scope is safer but will silently deny
-   any build/test command a user's PLAN.md invokes outside git/npm/npx (e.g. `pytest`, `cargo`,
-   `dotnet`), which then looks like a hang. Step 1 pins whatever *works*, but the **policy** is
-   yours: do you want a fixed allowlist, or should the new-tab dialog expose the Bash allow-rules so
-   a user can widen them per project? I lean "start with `git`/`npm`/`npx`/`node` scoped, and make it
-   editable in the dialog" — but that edges toward the field-count you might not want.
+3. **Bash scope — scoped default + one editable field.** Correction to my earlier assumption: a
+   denied Bash command does **not** hang — it lands in the result JSON's `permission_denials` array
+   and Claude reports it in its summary (observed in the 2026-07-13 run). So the tight scope is the
+   safe default: `Bash(git *) Bash(npm *) Bash(npx *) Bash(node *)`, plus a single free-text
+   "Extra Bash allow-rules" field in the new-tab dialog (Step 17) to widen it for `pytest`/`cargo`/
+   `dotnet`/etc. One field, not more.
 
-4. **The discipline block already differs between two sources.** Your live `~/.claude/CLAUDE.md`
-   carries a 6-point "Autonomous run discipline" section, while
-   `docs/specs/claude-md-autonomous-discipline.md` is the 7-point canonical version (adds "Never
-   scaffold half a step"). Pre-flight R6.6 therefore must match on the **heading**, not the body,
-   or it will nag correctly-configured machines. Step 13 does heading-match. **Confirm** you want
-   pre-flight to only ensure the *section exists* (not that it's byte-identical to the companion
-   doc), and whether the "offer to append" action should append the 7-point canonical version even
-   when a shorter one is already present (I'd say: if the heading exists, leave it alone).
+4. **Discipline check — heading-match only.** Pre-flight R6.6 (Step 13) ensures a heading matching
+   `/^##\s+Autonomous run discipline/m` exists in `~/.claude/CLAUDE.md` and does nothing else: if the
+   heading is present it is left untouched (a shorter live version is never overwritten with the
+   7-point canonical one). The "offer to append" path fires only when the heading is entirely absent.
 
-5. **Does a live, authenticated `claude` exist in the environment where this plan will run?** Steps
-   1 and 19 are `[LIVE]` — they invoke the real CLI and cost tokens. If this plan is itself run
-   unattended by the Autonomous tab, those steps will either need `claude` authenticated in that
-   environment or they must stop with a Blockers entry (which is the correct discipline). **Tell me**
-   whether to keep Step 1 as a hard gate at position 1, or move both live steps to the very end
-   behind an explicit "run the live gate now?" confirmation so the deterministic 90% can complete
-   unattended first.
+5. **[LIVE] steps — Step 1 stays at position 1; Steven runs it.** Nothing is built on an unproven
+   invocation, so the spike remains first, run interactively by Steven (its fallback ladder needs
+   human judgment). Step 19's live gate is likewise interactive. **Steps 2–18 are the unattended
+   range** (all deterministic via the fake-claude stub) — marked in the invariants above.

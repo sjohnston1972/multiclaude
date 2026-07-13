@@ -77,8 +77,13 @@ A new tab type **Autonomous** in the new-tab dialog. Fields:
 - **PLAN.md** — auto-detected at repo root; button to open in editor; hard warning if missing
 - **Additional directories** — optional list; each becomes an `--add-dir` flag (fixes B4)
 - **Model** — default `sonnet`, `opus` available
-- **Max turns per invocation** — default 60
-- **Budget cap USD** — optional, maps to `--max-budget-usd`
+- **Budget cap USD** — optional, maps to `--max-budget-usd`. This is the only hard per-invocation
+  cap. There is **no** turn cap: `--max-turns` was removed from the `claude` CLI (verified absent in
+  v2.1.207, top-level and print-mode help), so the per-turn "do exactly one step then stop" bound
+  comes from the R10 prompt and the discipline block, not a flag.
+- **Extra Bash allow-rules** — optional free-text; appended to the default
+  `Bash(git *) Bash(npm *) Bash(npx *) Bash(node *)` allowlist so a plan that runs `pytest`,
+  `cargo`, `dotnet`, etc. can be widened per project (see R8)
 
 Below the fields, a pre-flight panel (R6) that must go green before Launch enables.
 
@@ -183,9 +188,8 @@ loop:
     --output-format stream-json
     --include-partial-messages
     --verbose
-    --allowedTools "Read,Edit,Write,Glob,Grep,Bash"
+    --allowedTools "Read Edit Write Glob Grep Bash(git *) Bash(npm *) Bash(npx *) Bash(node *) <plus any extra allow-rules from R1>"
     --permission-mode acceptEdits
-    --max-turns <configured>
     --add-dir <each configured extra dir>
     --model <configured>
     [--max-budget-usd <configured>]
@@ -208,10 +212,13 @@ loop:
       stop
 ```
 
-**On B2 specifically:** the allowed-tools list MUST include `Bash` so `git add` / `git commit`
-succeed. If the build agent prefers a tighter scope than blanket `Bash`, scoped rules are
-acceptable — e.g. `Bash(git *)`, `Bash(npm *)`, `Bash(npx *)` — but git must be covered. Verify
-this by observing an actual commit land in the first turn of an integration test.
+**On B2 specifically:** the allowed-tools list MUST cover git so `git add` / `git commit` succeed.
+Default to the scoped set `Bash(git *) Bash(npm *) Bash(npx *) Bash(node *)` (safer than blanket
+`Bash`), widened per project via the R1 "Extra Bash allow-rules" field. A denied Bash command does
+**not** hang the run: in the 2026-07-13 test the result JSON's `permission_denials` array was
+populated with every denied call and Claude reported the denial in its summary — denials surface,
+they don't stall. Verify the git path by observing an actual commit land in the first turn of an
+integration test.
 
 ### R9 — Persistence
 
