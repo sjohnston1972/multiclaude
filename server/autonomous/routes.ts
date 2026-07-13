@@ -6,6 +6,7 @@ import { createTab, getTab, listTabs, relaunchTab, pauseTab, resumeTab, killTab,
 import { hasBlockers } from "./loop.js";
 import { runPreflight } from "./preflight.js";
 import { prepareLaunch } from "./launch.js";
+import { scaffoldProject } from "./scaffold.js";
 
 /**
  * REST API for autonomous tabs. Follows multiclaude's envelope: on failure
@@ -106,6 +107,24 @@ export function registerAutonomousRoutes(app: FastifyInstance): void {
       sessionId,
       launchTag,
     });
+  });
+
+  // Scaffold PLAN.md + PROGRESS.md from templates into a target dir (R12).
+  app.post("/api/autonomous/scaffold", async (req, reply) => {
+    const body = (req.body ?? {}) as { projectDir?: string };
+    const projectDir = (body.projectDir ?? "").trim();
+    try {
+      if (!projectDir || !fs.statSync(projectDir).isDirectory()) throw new Error();
+    } catch {
+      reply.code(400);
+      return { error: `Project directory doesn't exist: ${projectDir}` };
+    }
+    const result = scaffoldProject(projectDir);
+    if (result.conflict) {
+      reply.code(409);
+      return { error: `Won't overwrite existing ${result.conflict} — edit it instead.` };
+    }
+    return result;
   });
 
   app.get("/api/autonomous", async () => listTabs());
