@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { AutonomousManager } from "./manager.js";
+import { readRecords, writeRecords } from "./store.js";
 import type { AutonomousRecord } from "./types.js";
 
 /**
@@ -27,6 +28,27 @@ export interface CreateTabInput {
   /** Reuse a pinned UUID (relaunch, Step 12). */
   sessionId?: string;
   launchTag?: string | null;
+}
+
+/** Write all current records to disk (R9). Called on create and every state change. */
+function persist(): void {
+  try {
+    writeRecords(listTabs());
+  } catch {
+    /* best-effort — a transient file lock must never crash the server */
+  }
+}
+
+/**
+ * Load persisted records on startup. Their supervisors aren't live yet, so they
+ * come back as relaunchable (Step 12 offers a one-click relaunch with the pinned
+ * UUID). Records mid-run when the server died are marked so, not shown as running.
+ */
+export function loadPersisted(): void {
+  for (const r of readRecords()) {
+    if (records.has(r.id)) continue;
+    records.set(r.id, { ...r, state: r.state === "done" || r.state === "blocked" ? r.state : "error" });
+  }
 }
 
 /** Merge the static record with the manager's live status into the API DTO. */
@@ -74,10 +96,12 @@ export function createTab(input: CreateTabInput): AutonomousRecord {
     record.state = s;
     record.lastTurnAt = Date.now();
     record.lastError = manager.lastError;
+    persist();
   });
 
   void manager.start();
   record.state = manager.getState();
+  persist();
   return dto(id)!;
 }
 

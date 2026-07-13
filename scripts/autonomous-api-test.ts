@@ -26,6 +26,7 @@ fs.writeFileSync(path.join(dir, "PLAN.md"), "1. do a thing\n");
 fs.writeFileSync(path.join(dir, "PROGRESS.md"), "## Blockers\n");
 
 process.env.STUB_SCENARIO = "done"; // created tabs settle quickly, no runaway loop
+process.env.MULTICLAUDE_AUTONOMOUS_FILE = path.join(dir, "autonomous.json"); // isolate persistence
 __setSpawnOverride({ command: process.execPath, args: [stub] });
 
 const app = Fastify();

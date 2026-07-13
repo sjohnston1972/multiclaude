@@ -11,7 +11,7 @@ import { registerLauncherRoutes } from "./launcher.js";
 import { pruneOldImages, registerImageRoutes } from "./images.js";
 import { registerAutonomousRoutes } from "./autonomous/routes.js";
 import { attachAutonomousViewer } from "./autonomous/manager.js";
-import { getManager } from "./autonomous/registry.js";
+import { getManager, loadPersisted } from "./autonomous/registry.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -288,6 +288,7 @@ app.delete("/api/sessions/:id", async (req, reply) => {
 registerLauncherRoutes(app);
 registerImageRoutes(app);
 registerAutonomousRoutes(app);
+loadPersisted(); // bring back autonomous tabs from a previous run (offered for relaunch)
 pruneOldImages();
 // Prune again daily so a long-running (autostarted) server doesn't hoard images.
 setInterval(pruneOldImages, 24 * 60 * 60 * 1000).unref();

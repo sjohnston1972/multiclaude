@@ -28,6 +28,7 @@ function seed(progressBody: string) {
 }
 
 process.env.STUB_SCENARIO = "done";
+process.env.MULTICLAUDE_AUTONOMOUS_FILE = path.join(os.tmpdir(), `mc-files-records-${process.pid}.json`); // isolate persistence
 __setSpawnOverride({ command: process.execPath, args: [stub] });
 
 const app = Fastify();
