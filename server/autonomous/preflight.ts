@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
+import { scanPlanForPaths, type PathScanRow } from "./pathScan.js";
 
 const execFileA = promisify(execFile);
 
@@ -26,6 +27,8 @@ export interface PreflightResult {
   seedable: boolean;
   /** Discipline block missing from CLAUDE.md → offer to append (R6.6). */
   disciplineOfferAppend: boolean;
+  /** PLAN.md path-scan table (R6.5) — one row per referenced filesystem path. */
+  pathScan: PathScanRow[];
   /** No ❌ remaining — Launch may be enabled (⚠️ still require explicit accept in the UI). */
   canLaunch: boolean;
 }
@@ -37,10 +40,11 @@ export function claudeMdPath(): string {
 
 const DISCIPLINE_HEADING = /^##\s+Autonomous run discipline/m;
 
-export async function runPreflight(projectDir: string): Promise<PreflightResult> {
+export async function runPreflight(projectDir: string, addDirs: string[] = []): Promise<PreflightResult> {
   const checks: PreflightCheck[] = [];
   let seedable = false;
   let disciplineOfferAppend = false;
+  let pathScan: PathScanRow[] = [];
 
   // 1. project directory is a git repo
   let isRepo = false;
@@ -93,6 +97,27 @@ export async function runPreflight(projectDir: string): Promise<PreflightResult>
     checks.push({ id: "progress", label: "PROGRESS.md exists at repo root", level: "warn", detail: "missing — multiclaude can seed it and commit before launch" });
   }
 
+  // 5. PLAN.md path scan — flag paths that leave the sandbox (R6.5, fixes B3/B4)
+  if (planExists) {
+    try {
+      pathScan = scanPlanForPaths(fs.readFileSync(path.join(projectDir, "PLAN.md"), "utf8"), projectDir, addDirs);
+    } catch {
+      /* unreadable — the PLAN.md check above already reflects that */
+    }
+  }
+  const flagged = pathScan.filter((r) => !r.reachable || r.issue);
+  checks.push({
+    id: "path-scan",
+    label: "PLAN.md paths stay in the sandbox",
+    level: flagged.length === 0 ? "ok" : "warn",
+    detail:
+      flagged.length === 0
+        ? pathScan.length
+          ? `${pathScan.length} path(s) checked, all reachable`
+          : "no filesystem paths referenced"
+        : `${flagged.length} path(s) may be outside the sandbox — add them to Additional directories or fix the plan`,
+  });
+
   // 6. discipline block present (heading-match only — never overwrite a shorter live version)
   try {
     const md = fs.readFileSync(claudeMdPath(), "utf8");
@@ -115,5 +140,5 @@ export async function runPreflight(projectDir: string): Promise<PreflightResult>
     checks.push({ id: "claude-cli", label: "claude CLI available", level: "fail", detail: "`claude` isn't on PATH" });
   }
 
-  return { checks, seedable, disciplineOfferAppend, canLaunch: checks.every((c) => c.level !== "fail") };
+  return { checks, seedable, disciplineOfferAppend, pathScan, canLaunch: checks.every((c) => c.level !== "fail") };
 }

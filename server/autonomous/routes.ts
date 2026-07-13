@@ -46,13 +46,13 @@ export function registerAutonomousRoutes(app: FastifyInstance): void {
 
   // Pre-flight validation for the new-tab dialog (R6). Gate Launch on canLaunch.
   app.post("/api/autonomous/preflight", async (req, reply) => {
-    const body = (req.body ?? {}) as { projectDir?: string };
+    const body = (req.body ?? {}) as { projectDir?: string; addDirs?: string[] };
     const projectDir = (body.projectDir ?? "").trim();
     if (!projectDir) {
       reply.code(400);
       return { error: "A project directory is required." };
     }
-    return runPreflight(projectDir);
+    return runPreflight(projectDir, Array.isArray(body.addDirs) ? body.addDirs : []);
   });
 
   app.get("/api/autonomous", async () => listTabs());
