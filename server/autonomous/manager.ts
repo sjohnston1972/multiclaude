@@ -69,6 +69,34 @@ function killTree(pid: number): void {
   execFile("taskkill", ["/pid", String(pid), "/T", "/F"], { windowsHide: true }, () => {});
 }
 
+/** The minimal WebSocket surface a viewer needs — satisfied by the `ws` package and clients alike. */
+interface ViewerSocket {
+  readyState: number;
+  send(data: string): void;
+  on(event: "close", cb: () => void): void;
+}
+
+/**
+ * Attach a browser viewer to a run: send `ready`, replay the buffered events +
+ * current status, then stream live events and status changes until the socket
+ * closes. Mirrors SessionManager's attach/replay so "close the browser, come
+ * back later" just works.
+ */
+export function attachAutonomousViewer(ws: ViewerSocket, manager: AutonomousManager): void {
+  const OPEN = 1;
+  const send = (o: unknown) => {
+    if (ws.readyState === OPEN) ws.send(JSON.stringify(o));
+  };
+  send({ type: "ready", sessionId: manager.sessionId });
+  send({ type: "replay", events: manager.getEvents(), status: manager.getStatus() });
+  const offEvent = manager.onEvent((event) => send({ type: "event", event }));
+  const offState = manager.onState(() => send({ type: "status", status: manager.getStatus() }));
+  ws.on("close", () => {
+    offEvent();
+    offState();
+  });
+}
+
 export class AutonomousManager {
   readonly sessionId: string;
   wakeAt: number | null = null;
