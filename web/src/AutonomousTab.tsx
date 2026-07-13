@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { TabNode } from "flexlayout-react";
+import AutonomousSidePane from "./AutonomousSidePane";
 
 /**
  * One Autonomous tab = one WebSocket to /ws/autonomous?tab=<id>. The server holds
@@ -60,6 +61,7 @@ export default function AutonomousTab({
   const [events, setEvents] = useState<AutoEvent[]>([]);
   const [conn, setConn] = useState<"connecting" | "open" | "closed">("connecting");
   const [showRaw, setShowRaw] = useState(false);
+  const [showFiles, setShowFiles] = useState(true);
   const [copied, setCopied] = useState(false);
   // Ticking clock so elapsed times advance between status messages.
   const [, setTick] = useState(0);
@@ -155,28 +157,34 @@ export default function AutonomousTab({
           <input type="checkbox" checked={showRaw} onChange={(e) => setShowRaw(e.target.checked)} />
           Show raw log
         </label>
+        <button onClick={() => setShowFiles((v) => !v)} className="text-neutral-500 hover:text-neutral-300">
+          {showFiles ? "Hide files" : "Show files"}
+        </button>
       </div>
 
       {status?.lastError && (
         <div className="border-b border-red-900 bg-red-950/60 px-3 py-1.5 text-xs text-red-200">{status.lastError}</div>
       )}
 
-      {/* R3 — event log */}
-      <div ref={logRef} className="min-h-0 flex-1 overflow-y-auto px-3 py-2 font-mono text-[13px] leading-relaxed">
-        {conn === "connecting" && <div className="text-neutral-500">Connecting…</div>}
-        {conn === "closed" && <div className="text-neutral-500">Disconnected — the run may have ended.</div>}
-        {showRaw
-          ? events.map((ev) => (
-              <div key={ev.seq} className="whitespace-pre-wrap break-all text-neutral-400">
-                {JSON.stringify(ev.payload)}
-              </div>
-            ))
-          : lines.map((l) => (
-              <div key={l.key} className="flex gap-2">
-                <span className="w-5 shrink-0 text-center">{l.icon}</span>
-                <span className="text-neutral-200">{l.summary}</span>
-              </div>
-            ))}
+      {/* R3 event log + R4 side pane */}
+      <div className="flex min-h-0 flex-1">
+        <div ref={logRef} className="min-h-0 flex-1 overflow-y-auto px-3 py-2 font-mono text-[13px] leading-relaxed">
+          {conn === "connecting" && <div className="text-neutral-500">Connecting…</div>}
+          {conn === "closed" && <div className="text-neutral-500">Disconnected — the run may have ended.</div>}
+          {showRaw
+            ? events.map((ev) => (
+                <div key={ev.seq} className="whitespace-pre-wrap break-all text-neutral-400">
+                  {JSON.stringify(ev.payload)}
+                </div>
+              ))
+            : lines.map((l) => (
+                <div key={l.key} className="flex gap-2">
+                  <span className="w-5 shrink-0 text-center">{l.icon}</span>
+                  <span className="text-neutral-200">{l.summary}</span>
+                </div>
+              ))}
+        </div>
+        {showFiles && <AutonomousSidePane tabId={tabId} currentStep={status?.currentStep ?? null} />}
       </div>
     </div>
   );

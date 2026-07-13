@@ -1,6 +1,8 @@
 import type { FastifyInstance } from "fastify";
 import fs from "node:fs";
+import path from "node:path";
 import { createTab, getTab, listTabs, type CreateTabInput } from "./registry.js";
+import { hasBlockers } from "./loop.js";
 
 /**
  * REST API for autonomous tabs. Follows multiclaude's envelope: on failure
@@ -51,5 +53,29 @@ export function registerAutonomousRoutes(app: FastifyInstance): void {
       return { error: "No such autonomous tab." };
     }
     return record;
+  });
+
+  // Live state files for the R4 side pane. blockersPresent is the feature's most
+  // important signal — the UI surfaces it prominently.
+  app.get("/api/autonomous/:id/files", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const record = getTab(id);
+    if (!record) {
+      reply.code(404);
+      return { error: "No such autonomous tab." };
+    }
+    const read = (name: string): string | null => {
+      try {
+        return fs.readFileSync(path.join(record.projectDir, name), "utf8");
+      } catch {
+        return null;
+      }
+    };
+    const progress = read("PROGRESS.md");
+    return {
+      plan: read("PLAN.md"),
+      progress,
+      blockersPresent: progress ? hasBlockers(progress) : false,
+    };
   });
 }
