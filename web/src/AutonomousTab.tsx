@@ -35,6 +35,7 @@ const STATE_STYLE: Record<string, { label: string; cls: string }> = {
   preflight: { label: "preflight", cls: "bg-neutral-700 text-neutral-200" },
   running: { label: "running", cls: "bg-blue-600 text-white" },
   sleeping: { label: "sleeping", cls: "bg-amber-600 text-white" },
+  paused: { label: "paused", cls: "bg-neutral-500 text-white" },
   blocked: { label: "blocked", cls: "bg-orange-600 text-white" },
   done: { label: "DONE", cls: "bg-emerald-600 text-white" },
   error: { label: "error", cls: "bg-red-700 text-white" },
@@ -63,6 +64,8 @@ export default function AutonomousTab({
   const [showRaw, setShowRaw] = useState(false);
   const [showFiles, setShowFiles] = useState(true);
   const [copied, setCopied] = useState(false);
+  const [confirmRollback, setConfirmRollback] = useState(false);
+  const [busy, setBusy] = useState(false);
   // Ticking clock so elapsed times advance between status messages.
   const [, setTick] = useState(0);
   const statusRef = useRef<{ s: Status; at: number } | null>(null);
@@ -130,6 +133,20 @@ export default function AutonomousTab({
     });
   };
 
+  const control = async (action: "pause" | "resume" | "kill" | "rollback") => {
+    setBusy(true);
+    try {
+      await fetch(`/api/autonomous/${encodeURIComponent(tabId)}/${action}`, { method: "POST" });
+    } catch {
+      /* status stream reflects the result */
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const st = status?.state;
+  const rollbackCmd = `git reset --hard <launch-tag> && git clean -fd`;
+
   return (
     <div className="flex h-full flex-col bg-neutral-950 text-neutral-200">
       {/* R2 — status strip */}
@@ -161,6 +178,49 @@ export default function AutonomousTab({
           {showFiles ? "Hide files" : "Show files"}
         </button>
       </div>
+
+      {/* R5 — controls */}
+      <div className="flex items-center gap-2 border-b border-neutral-800 px-3 py-1.5">
+        {st === "running" || st === "sleeping" ? (
+          <button disabled={busy} onClick={() => control("pause")} className="rounded bg-neutral-700 px-2 py-0.5 text-xs text-neutral-100 hover:bg-neutral-600 disabled:opacity-50">
+            Pause
+          </button>
+        ) : (
+          <button disabled={busy} onClick={() => control("resume")} className="rounded bg-blue-600 px-2 py-0.5 text-xs text-white hover:bg-blue-500 disabled:opacity-50">
+            Resume
+          </button>
+        )}
+        <button disabled={busy} onClick={() => control("kill")} className="rounded bg-neutral-700 px-2 py-0.5 text-xs text-neutral-100 hover:bg-neutral-600 disabled:opacity-50">
+          Kill
+        </button>
+        <button disabled={busy} onClick={() => setConfirmRollback(true)} className="rounded bg-red-800 px-2 py-0.5 text-xs text-white hover:bg-red-700 disabled:opacity-50">
+          Rollback
+        </button>
+      </div>
+
+      {confirmRollback && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onMouseDown={() => setConfirmRollback(false)}>
+          <div className="w-[520px] max-w-[95vw] rounded-lg border border-red-800 bg-neutral-900 p-4 text-sm" onMouseDown={(e) => e.stopPropagation()}>
+            <h3 className="mb-2 font-semibold text-red-300">Roll back this run?</h3>
+            <p className="mb-2 text-neutral-300">This discards all work since launch and removes the run's state directory. It runs, in the project repo:</p>
+            <pre className="mb-3 overflow-x-auto rounded bg-neutral-950 px-3 py-2 font-mono text-xs text-neutral-200">{rollbackCmd}</pre>
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setConfirmRollback(false)} className="rounded bg-neutral-700 px-3 py-1 text-neutral-100 hover:bg-neutral-600">
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  setConfirmRollback(false);
+                  void control("rollback");
+                }}
+                className="rounded bg-red-700 px-3 py-1 text-white hover:bg-red-600"
+              >
+                Yes, reset --hard
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {status?.lastError && (
         <div className="border-b border-red-900 bg-red-950/60 px-3 py-1.5 text-xs text-red-200">{status.lastError}</div>

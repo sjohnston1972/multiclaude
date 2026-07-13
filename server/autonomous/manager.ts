@@ -349,4 +349,24 @@ export class AutonomousManager {
     if (this.child?.pid) killTree(this.child.pid);
     this.child = null;
   }
+
+  /** R5 Pause: stop cleanly, session preserved. An in-flight turn hasn't committed, so it's safe. */
+  pause(): void {
+    this.stop();
+    this.setState("paused");
+  }
+
+  /** R5 Kill: hard stop; the working tree may be mid-step, so mark it inconsistent. */
+  kill(): void {
+    this.stop();
+    this.lastError = "Killed — the working tree may be mid-step; state could be inconsistent.";
+    this.setState("error");
+  }
+
+  /** R5 Resume: re-enter the loop; the session already exists, so the first call uses --resume. */
+  async resume(): Promise<void> {
+    if (this.looping) return;
+    this.invoked = true;
+    await this.start();
+  }
 }

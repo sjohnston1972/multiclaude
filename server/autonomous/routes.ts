@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { createTab, getTab, listTabs, relaunchTab, type CreateTabInput } from "./registry.js";
+import { createTab, getTab, listTabs, relaunchTab, pauseTab, resumeTab, killTab, rollbackTab, type CreateTabInput } from "./registry.js";
 import { hasBlockers } from "./loop.js";
 import { runPreflight } from "./preflight.js";
 import { prepareLaunch } from "./launch.js";
@@ -130,6 +130,30 @@ export function registerAutonomousRoutes(app: FastifyInstance): void {
       return { error: "No such autonomous tab." };
     }
     return record;
+  });
+
+  // R5 controls. pause/resume/kill act on the live manager; rollback resets the repo.
+  for (const action of ["pause", "resume", "kill"] as const) {
+    app.post(`/api/autonomous/:id/${action}`, async (req, reply) => {
+      const { id } = req.params as { id: string };
+      const fn = { pause: pauseTab, resume: resumeTab, kill: killTab }[action];
+      const record = fn(id);
+      if (!record) {
+        reply.code(404);
+        return { error: "No such autonomous tab (or its supervisor isn't live)." };
+      }
+      return record;
+    });
+  }
+
+  app.post("/api/autonomous/:id/rollback", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const result = rollbackTab(id);
+    if ("error" in result) {
+      reply.code(400);
+      return result;
+    }
+    return result;
   });
 
   // Live state files for the R4 side pane. blockersPresent is the feature's most

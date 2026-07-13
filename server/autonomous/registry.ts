@@ -1,4 +1,7 @@
 import crypto from "node:crypto";
+import { execFileSync } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
 import { AutonomousManager } from "./manager.js";
 import { readRecords, writeRecords } from "./store.js";
 import type { AutonomousRecord } from "./types.js";
@@ -150,6 +153,61 @@ export function getTab(id: string): AutonomousRecord | undefined {
 
 export function getManager(id: string): AutonomousManager | undefined {
   return managers.get(id);
+}
+
+/** R5 Pause — stop the loop, session preserved. */
+export function pauseTab(id: string): AutonomousRecord | undefined {
+  const m = managers.get(id);
+  if (!m) return undefined;
+  m.pause();
+  persist();
+  return dto(id);
+}
+
+/** R5 Resume — re-enter the loop with --resume (or relaunch if the manager is gone). */
+export function resumeTab(id: string): AutonomousRecord | undefined {
+  const m = managers.get(id);
+  if (!m) return relaunchTab(id);
+  void m.resume();
+  persist();
+  return dto(id);
+}
+
+/** R5 Kill — hard stop; mark inconsistent. */
+export function killTab(id: string): AutonomousRecord | undefined {
+  const m = managers.get(id);
+  if (!m) return undefined;
+  m.kill();
+  persist();
+  return dto(id);
+}
+
+/**
+ * R5 Rollback — `git reset --hard <launch-tag>` + `git clean -fd` to drop untracked
+ * run artifacts (safe: pre-flight guaranteed a clean tree at launch), then remove
+ * the state dir and forget the tab. Returns the exact command run for the UI.
+ */
+export function rollbackTab(id: string): { ok: true; command: string } | { error: string } {
+  const record = records.get(id);
+  if (!record) return { error: "No such autonomous tab." };
+  if (!record.launchTag) return { error: "No launch tag recorded — nothing to roll back to." };
+  managers.get(id)?.stop();
+  const command = `git reset --hard ${record.launchTag} && git clean -fd`;
+  try {
+    execFileSync("git", ["-C", record.projectDir, "reset", "--hard", record.launchTag], { stdio: "pipe", windowsHide: true });
+    execFileSync("git", ["-C", record.projectDir, "clean", "-fd"], { stdio: "pipe", windowsHide: true });
+  } catch (err) {
+    return { error: `Rollback failed: ${(err as Error).message}` };
+  }
+  try {
+    fs.rmSync(path.join(record.projectDir, ".multiclaude", record.taskName), { recursive: true, force: true });
+  } catch {
+    /* best effort — the reset already restored tracked files */
+  }
+  managers.delete(id);
+  records.delete(id);
+  persist();
+  return { ok: true, command };
 }
 
 /** Stop and forget everything — used by tests between cases. */

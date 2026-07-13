@@ -11,6 +11,7 @@ export type AutonomousState =
   | "preflight" // pre-launch checks not yet green
   | "running" // an invocation is in flight
   | "sleeping" // waiting out a usage-limit reset (Step 3)
+  | "paused" // operator paused it (R5); resumable via the pinned UUID
   | "blocked" // Claude stopped on an ambiguity (DONE + Blockers)
   | "done" // task complete (DONE, no Blockers)
   | "error"; // non-recoverable failure
