@@ -1,24 +1,54 @@
 #!/usr/bin/env node
-// Fake `claude` for deterministic AutonomousManager tests. Emits scripted
-// stream-json lines to stdout, then exits — no network, no tokens. Behaviour is
-// selected by the STUB_SCENARIO env var so later steps can reuse it:
+// Fake `claude` for deterministic AutonomousManager/loop tests. Emits scripted
+// stream-json to stdout, then exits — no network, no tokens. Behaviour is chosen
+// by the STUB_SCENARIO env var:
 //
-//   ok    (default) — a normal successful turn, exit 0        (Step 2)
-//   Step 3 will add: limit — usage-limit message + exit 1
-//                    done  — writes a DONE file + exit 0
+//   ok          (default) a normal successful turn, exit 0 (no DONE — loop continues)
+//   done        write a DONE file in cwd, exit 0 (loop should stop → done)
+//   blocked     append a real Blockers entry to PROGRESS.md + write DONE, exit 0 (→ blocked)
+//   limit       emit a usage-limit message with an ISO reset time, exit 1 (→ sleeping)
+//   delete-plan delete PLAN.md in cwd, exit 0 (next turn's integrity guard should trip)
 //
-// It ignores the claude-style args it's handed; the manager passes them, the stub
-// doesn't care.
+// It ignores the claude-style args it's handed.
+
+import fs from "node:fs";
+import path from "node:path";
 
 const emit = (obj) => process.stdout.write(JSON.stringify(obj) + "\n");
 const scenario = process.env.STUB_SCENARIO ?? "ok";
+const cwd = process.cwd();
 
-emit({ type: "system", subtype: "init", session_id: "stub-session", cwd: process.cwd() });
+emit({ type: "system", subtype: "init", session_id: "stub-session", cwd });
 emit({ type: "assistant", message: { content: [{ type: "text", text: "Working on Step 1: scaffold" }] } });
 emit({ type: "assistant", message: { content: [{ type: "tool_use", name: "Read", input: { file_path: "PLAN.md" } }] } });
-emit({ type: "assistant", message: { content: [{ type: "tool_use", name: "Bash", input: { command: "git commit -m 'feat: step 1'" } }] } });
 
-// scenario branches for later steps land here (limit / done).
+if (scenario === "limit") {
+  const reset = new Date(Date.now() + 90 * 60 * 1000).toISOString();
+  emit({
+    type: "assistant",
+    message: { content: [{ type: "text", text: `You've hit your session limit. Access resets at ${reset}.` }] },
+  });
+  emit({ type: "result", subtype: "error_max_turns", is_error: true, total_cost_usd: 0.0, session_id: "stub-session" });
+  process.exit(1);
+}
+
+if (scenario === "delete-plan") {
+  try {
+    fs.rmSync(path.join(cwd, "PLAN.md"), { force: true });
+  } catch {}
+}
+
+if (scenario === "done" || scenario === "blocked") {
+  emit({ type: "assistant", message: { content: [{ type: "tool_use", name: "Bash", input: { command: "git commit -m 'feat: step 1'" } }] } });
+  if (scenario === "blocked") {
+    const p = path.join(cwd, "PROGRESS.md");
+    try {
+      const cur = fs.existsSync(p) ? fs.readFileSync(p, "utf8") : "## Blockers\n";
+      fs.writeFileSync(p, cur + "\n- Step 2 needs a secret not in .env — three options: (a)…\n");
+    } catch {}
+  }
+  fs.writeFileSync(path.join(cwd, "DONE"), "");
+}
 
 emit({
   type: "result",

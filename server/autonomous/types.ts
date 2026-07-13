@@ -40,6 +40,10 @@ export interface AutonomousEvent {
 export interface AutonomousConfig {
   /** Working directory the run operates in (the target git repo). */
   cwd: string;
+  /** Reuse a pinned session UUID (relaunch after a restart, R9). Generated if absent. */
+  sessionId?: string;
+  /** Pause between successful turns, ms (default 10 000). Tests set it small. */
+  turnDelayMs?: number;
   /** Model alias, default `sonnet`. */
   model?: string;
   /** Extra directories granted via `--add-dir` (fixes B4). */

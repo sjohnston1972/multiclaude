@@ -1,9 +1,11 @@
-// Verifies the AutonomousManager skeleton (Step 2): spawn one invocation against
-// the fake-claude stub, buffer its events, and transition running → done.
-// Deterministic — no real claude, no tokens. Run with:
+// Verifies the AutonomousManager (Steps 2-3): spawn against the fake-claude stub,
+// buffer events, and — with the supervisor loop — reach `done` when a DONE file
+// appears. Deterministic; no real claude, no tokens. Run with:
 //
 //     npx tsx scripts/manager-spawn-test.ts
 
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { AutonomousManager } from "../server/autonomous/manager.js";
@@ -18,12 +20,20 @@ const check = (name: string, cond: boolean, extra = "") => {
   if (!cond) failures++;
 };
 
+// A repo the integrity guard is happy with: PLAN.md + PROGRESS.md present.
+const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "mc-mgr-"));
+fs.writeFileSync(path.join(cwd, "PLAN.md"), "1. do a thing\n");
+fs.writeFileSync(path.join(cwd, "PROGRESS.md"), "## Blockers\n");
+
 const states: AutonomousState[] = [];
 let liveEvents = 0;
 
+const prevScenario = process.env.STUB_SCENARIO;
+process.env.STUB_SCENARIO = "done"; // one turn writes DONE → loop stops at `done`
+
 const mgr = new AutonomousManager({
-  cwd: __dirname,
-  // Test seam: run the stub via node instead of the real claude binary.
+  cwd,
+  turnDelayMs: 5,
   spawn: { command: process.execPath, args: [stub] },
 });
 mgr.onState((s) => states.push(s));
@@ -34,7 +44,11 @@ check("starts in preflight", mgr.getState() === "preflight");
 
 await mgr.start();
 
-check("state went running → done", states[0] === "running" && mgr.getState() === "done", states.join("→"));
+if (prevScenario === undefined) delete process.env.STUB_SCENARIO;
+else process.env.STUB_SCENARIO = prevScenario;
+fs.rmSync(cwd, { recursive: true, force: true });
+
+check("state went running → done", states.includes("running") && mgr.getState() === "done", states.join("→"));
 check("buffered ≥1 event", mgr.getEvents().length >= 1, `got ${mgr.getEvents().length}`);
 check("live event listener fired", liveEvents >= 1, `got ${liveEvents}`);
 
