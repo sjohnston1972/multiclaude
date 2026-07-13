@@ -172,15 +172,56 @@ export default function TerminalPane({
       }
     });
 
-    // Copy-on-select, like a classic PowerShell window.
-    const selSub = term.onSelectionChange(() => {
-      const selection = term.getSelection();
-      if (selection) {
-        navigator.clipboard.writeText(selection).catch(() => {
-          /* clipboard permission denied — not fatal */
-        });
+    // Copy to the clipboard in a way that works everywhere this app runs.
+    // The modern async clipboard API (navigator.clipboard) only exists in a
+    // "secure context" — https, or http://localhost. Over the LAN (http://<ip>)
+    // it is simply undefined, so we fall back to the old execCommand route,
+    // which still works over plain http. Returns false only if both routes fail.
+    const execCommandCopy = (text: string): boolean => {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      // Off-screen and non-scrolling so selecting it doesn't jump the page.
+      ta.style.position = "fixed";
+      ta.style.top = "0";
+      ta.style.left = "0";
+      ta.style.opacity = "0";
+      ta.setAttribute("readonly", "");
+      document.body.appendChild(ta);
+      ta.select();
+      let ok = false;
+      try {
+        ok = document.execCommand("copy");
+      } catch {
+        ok = false;
       }
-    });
+      document.body.removeChild(ta);
+      term.focus(); // execCommand stole focus into the textarea; hand it back
+      return ok;
+    };
+
+    const copyText = (text: string) => {
+      if (!text) return;
+      const fallback = () => {
+        if (!execCommandCopy(text)) showNotice("Couldn't copy to the clipboard");
+      };
+      if (navigator.clipboard?.writeText) {
+        navigator.clipboard.writeText(text).catch(fallback);
+      } else {
+        fallback();
+      }
+    };
+
+    // Copy-on-select, like a classic PowerShell "QuickEdit" window — but only
+    // ONCE, when the mouse is released and the selection has settled. The old
+    // code copied on every onSelectionChange, which fires per-character during a
+    // drag: dozens of clipboard writes in a burst, most rejected by the browser.
+    // That burst was the "janky, inconsistent" copy.
+    const copySelection = () => {
+      const sel = term.getSelection();
+      if (sel) copyText(sel);
+    };
+    container.addEventListener("mouseup", copySelection);
+    container.addEventListener("touchend", copySelection);
 
     // App-level shortcuts must not reach the shell: search + explicit copy
     // are handled here; new-tab / cycle-tabs bubble up to the window handler.
@@ -192,8 +233,7 @@ export default function TerminalPane({
         return false;
       }
       if (e.ctrlKey && e.shiftKey && e.code === "KeyC") {
-        const sel = term.getSelection();
-        if (sel) navigator.clipboard.writeText(sel).catch(() => {});
+        copyText(term.getSelection());
         return false;
       }
       if (e.ctrlKey && e.shiftKey && e.code === "KeyT") return false; // window handler opens dialog
@@ -248,9 +288,29 @@ export default function TerminalPane({
         void uploadImage(image);
       }
     };
+    // Right-click paste. Where the async clipboard API exists (localhost/https)
+    // we read it ourselves and inject via term.paste(), which respects the
+    // shell's bracketed-paste mode so multi-line pastes don't run line-by-line.
+    // Over the LAN that API is unavailable, so we let the browser's own context
+    // menu (with its Paste item) appear — that's the only way to read the
+    // clipboard there. Ctrl+V works in both cases; xterm handles the paste event.
+    const onContextMenu = (e: MouseEvent) => {
+      if (!navigator.clipboard?.readText) return; // let the native Paste menu show
+      e.preventDefault();
+      navigator.clipboard.readText().then(
+        (text) => {
+          if (text) term.paste(text);
+          term.focus();
+        },
+        () => {
+          /* clipboard read denied — nothing to paste */
+        }
+      );
+    };
     container.addEventListener("paste", onPaste);
     container.addEventListener("dragover", onDragOver);
     container.addEventListener("drop", onDrop);
+    container.addEventListener("contextmenu", onContextMenu);
 
     // Only apply a fit when cols/rows actually change — refitting on every
     // pixel-level container change makes the scrollbar flap on and off.
@@ -293,12 +353,14 @@ export default function TerminalPane({
       if (reconnectTimer) clearTimeout(reconnectTimer);
       if (noticeTimer.current) clearTimeout(noticeTimer.current);
       node?.removeEventListener("visibility");
+      container.removeEventListener("mouseup", copySelection);
+      container.removeEventListener("touchend", copySelection);
       container.removeEventListener("paste", onPaste);
       container.removeEventListener("dragover", onDragOver);
       container.removeEventListener("drop", onDrop);
+      container.removeEventListener("contextmenu", onContextMenu);
       resizeObserver.disconnect();
       dataSub.dispose();
-      selSub.dispose();
       ws?.close();
       term.dispose();
       termRef.current = null;
