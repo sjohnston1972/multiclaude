@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
+import Markdown from "./Markdown";
 
 /**
  * R4 side pane: live PROGRESS.md and read-only PLAN.md (current step highlighted).
  * A populated `## Blockers` section raises a prominent banner — the single most
- * important signal in the feature. Polls the files endpoint every 2s; no markdown
- * dependency, so content renders as monospace text.
+ * important signal in the feature. Polls the files endpoint every 2s. Rendered
+ * with a lightweight dependency-free markdown component.
  */
 
 interface Files {
@@ -48,7 +49,6 @@ export default function AutonomousSidePane({
   }, [tabId]);
 
   const n = stepNumber(currentStep);
-  const planLines = (files?.plan ?? "").split(/\r?\n/);
 
   return (
     <div className="flex w-96 shrink-0 flex-col border-l border-neutral-800 bg-neutral-900 text-xs">
@@ -71,26 +71,17 @@ export default function AutonomousSidePane({
           </button>
         ))}
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto p-3 font-mono leading-relaxed">
+      <div className="min-h-0 flex-1 overflow-y-auto p-3">
         {view === "progress" ? (
           files?.progress == null ? (
             <div className="text-neutral-500">No PROGRESS.md found.</div>
           ) : (
-            <pre className="whitespace-pre-wrap break-words text-neutral-200">{files.progress}</pre>
+            <Markdown text={files.progress} />
           )
         ) : files?.plan == null ? (
           <div className="text-neutral-500">No PLAN.md found.</div>
         ) : (
-          <div className="whitespace-pre-wrap break-words">
-            {planLines.map((line, i) => {
-              const isCurrent = n != null && new RegExp(`^\\s*${n}\\.`).test(line);
-              return (
-                <div key={i} className={isCurrent ? "-mx-1 rounded bg-blue-600/25 px-1 text-blue-100" : "text-neutral-300"}>
-                  {line || " "}
-                </div>
-              );
-            })}
-          </div>
+          <Markdown text={files.plan} highlightNum={n} />
         )}
       </div>
     </div>

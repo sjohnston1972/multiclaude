@@ -117,6 +117,7 @@ export class AutonomousManager {
 
   // --- status-strip fields (R2) ---
   private readonly startedAt = Date.now();
+  private finishedAt: number | null = null; // frozen wall-clock when the run reached a terminal state
   private turnStartAt: number | null = null;
   private currentStep: string | null = null;
   private lastCommit: { sha: string; subject: string } | null = null;
@@ -146,7 +147,7 @@ export class AutonomousManager {
       lastCommit: this.lastCommit,
       costUsd: this.costUsd,
       turnElapsedMs: this.state === "running" && this.turnStartAt ? Date.now() - this.turnStartAt : 0,
-      totalElapsedMs: Date.now() - this.startedAt,
+      totalElapsedMs: (this.finishedAt ?? Date.now()) - this.startedAt,
       wakeAt: this.wakeAt,
       lastError: this.lastError,
     };
@@ -164,6 +165,9 @@ export class AutonomousManager {
 
   private setState(s: AutonomousState): void {
     this.state = s;
+    // Freeze the total-elapsed clock when the run reaches a terminal state; unfreeze on (re)launch.
+    if (s === "done" || s === "blocked" || s === "error") this.finishedAt = Date.now();
+    else if (s === "running") this.finishedAt = null;
     for (const l of this.stateListeners) l(s);
   }
 

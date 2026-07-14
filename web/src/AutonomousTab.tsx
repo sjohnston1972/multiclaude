@@ -116,7 +116,8 @@ export default function AutonomousTab({
   const live = statusRef.current;
   const running = status?.state === "running";
   const sinceStatus = live ? Date.now() - live.at : 0;
-  const totalElapsed = (status?.totalElapsedMs ?? 0) + (live ? sinceStatus : 0);
+  // Only advance the clocks while actually running — freeze them once the run ends.
+  const totalElapsed = (status?.totalElapsedMs ?? 0) + (running && live ? sinceStatus : 0);
   const turnElapsed = running ? (status?.turnElapsedMs ?? 0) + sinceStatus : status?.turnElapsedMs ?? 0;
 
   const badge = STATE_STYLE[status?.state ?? "preflight"] ?? STATE_STYLE.preflight;
@@ -146,6 +147,20 @@ export default function AutonomousTab({
 
   const st = status?.state;
   const rollbackCmd = `git reset --hard <launch-tag> && git clean -fd`;
+
+  // A loud, unmistakable banner for any non-running resting state.
+  const completion =
+    st === "done"
+      ? { cls: "border-emerald-700 bg-emerald-950/50 text-emerald-200", text: "✓ Task complete — every PLAN.md step is done and verified. Nothing else will run." }
+      : st === "blocked"
+        ? { cls: "border-amber-600 bg-amber-950/50 text-amber-200", text: "⚠ Stopped on a blocker — read the Blockers section in PROGRESS.md (right), then Resume or Rollback." }
+        : st === "error"
+          ? { cls: "border-red-800 bg-red-950/60 text-red-200", text: `✗ Stopped with an error${status?.lastError ? ": " + status.lastError : ""}.` }
+          : st === "paused"
+            ? { cls: "border-neutral-600 bg-neutral-800/60 text-neutral-200", text: "⏸ Paused — click Resume to continue where it left off." }
+            : st === "sleeping"
+              ? { cls: "border-amber-700 bg-amber-950/40 text-amber-200", text: "⏳ Sleeping until the usage limit resets — it will resume automatically." }
+              : null;
 
   return (
     <div className="flex h-full flex-col bg-neutral-950 text-neutral-200">
@@ -197,6 +212,8 @@ export default function AutonomousTab({
           Rollback
         </button>
       </div>
+
+      {completion && <div className={"border-b px-3 py-1.5 text-xs font-medium " + completion.cls}>{completion.text}</div>}
 
       {confirmRollback && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onMouseDown={() => setConfirmRollback(false)}>
