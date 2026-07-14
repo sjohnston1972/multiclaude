@@ -122,6 +122,8 @@ export class AutonomousManager {
   private currentStep: string | null = null;
   private lastCommit: { sha: string; subject: string } | null = null;
   private costUsd = 0;
+  // Accumulated input-token usage across the run, for the cache-hit readout.
+  private usage = { cacheRead: 0, inputUncached: 0, cacheCreation: 0 };
 
   constructor(private config: AutonomousConfig) {
     // Pin a UUID at construction so it survives resets and process restarts (spec 3.2).
@@ -146,6 +148,10 @@ export class AutonomousManager {
       currentStep: this.currentStep,
       lastCommit: this.lastCommit,
       costUsd: this.costUsd,
+      cacheHitPct: (() => {
+        const total = this.usage.cacheRead + this.usage.inputUncached + this.usage.cacheCreation;
+        return total > 0 ? Math.round((this.usage.cacheRead / total) * 100) : null;
+      })(),
       turnElapsedMs: this.state === "running" && this.turnStartAt ? Date.now() - this.turnStartAt : 0,
       totalElapsedMs: (this.finishedAt ?? Date.now()) - this.startedAt,
       wakeAt: this.wakeAt,
@@ -327,7 +333,11 @@ export class AutonomousManager {
   private ingest(ev: ParsedEvent): void {
     this.pushEvent(ev.kind, ev.payload);
 
-    const p = ev.payload as { message?: { content?: Array<Record<string, unknown>> }; total_cost_usd?: number };
+    const p = ev.payload as {
+      message?: { content?: Array<Record<string, unknown>> };
+      total_cost_usd?: number;
+      usage?: { input_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number };
+    };
     if (ev.kind === "assistant" && Array.isArray(p.message?.content)) {
       for (const c of p.message!.content!) {
         if (c.type === "text" && typeof c.text === "string") {
@@ -339,6 +349,12 @@ export class AutonomousManager {
     } else if (ev.kind === "result") {
       this.turnText += " " + JSON.stringify(ev.payload);
       if (typeof p.total_cost_usd === "number") this.costUsd += p.total_cost_usd;
+      // Each turn's result carries that turn's cumulative token usage — sum for a run-wide cache-hit %.
+      if (p.usage) {
+        this.usage.cacheRead += p.usage.cache_read_input_tokens ?? 0;
+        this.usage.inputUncached += p.usage.input_tokens ?? 0;
+        this.usage.cacheCreation += p.usage.cache_creation_input_tokens ?? 0;
+      }
     } else if (ev.kind === "raw") {
       this.turnText += " " + (p as unknown as { line?: string }).line;
     }

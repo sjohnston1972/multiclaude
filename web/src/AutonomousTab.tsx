@@ -25,6 +25,7 @@ interface Status {
   currentStep: string | null;
   lastCommit: { sha: string; subject: string } | null;
   costUsd: number;
+  cacheHitPct: number | null;
   turnElapsedMs: number;
   totalElapsedMs: number;
   wakeAt: number | null;
@@ -178,6 +179,11 @@ export default function AutonomousTab({
           </span>
         )}
         <span className="text-emerald-400">${status?.costUsd?.toFixed(2) ?? "0.00"}</span>
+        {status?.cacheHitPct != null && (
+          <span className="text-neutral-500" title="Share of input tokens served from the prompt cache — higher means cheaper resumes">
+            cache {status.cacheHitPct}%
+          </span>
+        )}
         <button
           onClick={copyUuid}
           title="Copy session UUID"

@@ -51,6 +51,7 @@ console.log("  status:", JSON.stringify({ ...status, totalElapsedMs: "…", turn
 check("reached done", status.state === "done", status.state);
 check("currentStep parsed from 'Working on Step 1: scaffold'", status.currentStep === "Step 1: scaffold", String(status.currentStep));
 check("costUsd summed from result event", Math.abs(status.costUsd - 0.01) < 1e-9, String(status.costUsd));
+check("cacheHitPct derived from usage (900/1000 = 90)", status.cacheHitPct === 90, String(status.cacheHitPct));
 check("lastCommit reconciled from git", status.lastCommit?.subject === "seed: fixtures for status strip", JSON.stringify(status.lastCommit));
 check("lastCommit sha looks like a short sha", /^[0-9a-f]{7,}$/.test(status.lastCommit?.sha ?? ""), status.lastCommit?.sha);
 check("events carry rendered lines", mgr.getEvents().some((e) => e.rendered.length > 0));

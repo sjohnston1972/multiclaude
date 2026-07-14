@@ -13,6 +13,8 @@ export interface StatusStrip {
   lastCommit: { sha: string; subject: string } | null;
   /** Accumulated USD, summed from `result` events. */
   costUsd: number;
+  /** Share of input tokens served from the prompt cache (0-100), null until known. */
+  cacheHitPct: number | null;
   /** Time spent in the current turn (0 when not running). */
   turnElapsedMs: number;
   /** Time since the run launched. */
