@@ -280,9 +280,9 @@ export default function AutonomousTab({
                 </div>
               ))
             : lines.map((l) => (
-                <div key={l.key} className="flex gap-2">
+                <div key={l.key} className="flex items-start gap-2">
                   <span className="w-5 shrink-0 text-center">{l.icon}</span>
-                  <span className="text-neutral-200">{l.summary}</span>
+                  <span className="min-w-0 whitespace-pre-wrap break-words text-neutral-200">{l.summary}</span>
                 </div>
               ))}
         </div>

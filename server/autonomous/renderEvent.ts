@@ -15,7 +15,7 @@ export interface RenderedLine {
 
 const base = (p: unknown): string => (typeof p === "string" ? path.basename(p) : "");
 const firstLine = (s: unknown): string =>
-  typeof s === "string" ? s.trim().split(/\r?\n/)[0].slice(0, 120) : "";
+  typeof s === "string" ? s.trim().split(/\r?\n/)[0].slice(0, 1000) : "";
 
 /** Pull the message out of a `git commit -m "…"` command, if present. */
 function commitMessage(cmd: string): string | null {
