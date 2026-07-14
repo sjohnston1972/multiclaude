@@ -187,7 +187,7 @@ export default function AutonomousTab({
       {/* R2 — status strip */}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-neutral-800 px-3 py-2 text-xs">
         <span className="font-semibold text-neutral-100">{taskName ?? "autonomous"}</span>
-        <span className={`rounded px-2 py-0.5 font-medium ${badge.cls}`}>{sleepLabel}</span>
+        <span className={`rounded px-2 py-0.5 font-medium ${badge.cls} ${st === "running" ? "animate-pulse" : ""}`}>{sleepLabel}</span>
         {status?.currentStep && <span className="text-neutral-300">{status.currentStep}</span>}
         <span className="text-neutral-500">turn {fmtDuration(turnElapsed)}</span>
         <span className="text-neutral-500">total {fmtDuration(totalElapsed)}</span>
@@ -285,6 +285,12 @@ export default function AutonomousTab({
                   <span className="min-w-0 whitespace-pre-wrap break-words text-neutral-200">{l.summary}</span>
                 </div>
               ))}
+          {st === "running" && conn === "open" && (
+            <div className="mt-1 flex items-center gap-2 text-neutral-500">
+              <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-blue-400" />
+              working… (opus can pause here while it reasons or runs a slow command — the turn clock above keeps ticking)
+            </div>
+          )}
         </div>
         {showFiles && <AutonomousSidePane tabId={tabId} currentStep={status?.currentStep ?? null} />}
       </div>
