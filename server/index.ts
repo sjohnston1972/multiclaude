@@ -12,6 +12,7 @@ import { pruneOldImages, registerImageRoutes } from "./images.js";
 import { registerAutonomousRoutes } from "./autonomous/routes.js";
 import { attachAutonomousViewer } from "./autonomous/manager.js";
 import { getManager, loadPersisted } from "./autonomous/registry.js";
+import { autonomousStatus } from "./autonomous/discovery.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -151,6 +152,7 @@ app.get("/api/recent", async () => {
       path: f,
       name: path.basename(f) || f,
       isRepo: fs.existsSync(path.join(f, ".git")),
+      autonomous: autonomousStatus(f).status, // "completed" | "ready" | "drafting" | "none"
     }));
 });
 

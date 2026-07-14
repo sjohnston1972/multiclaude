@@ -92,6 +92,14 @@ export default function AutonomousNewDialog({
   const [acting, setActing] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showHelp, setShowHelp] = useState(!hasOnboarded());
+  const [readyRepos, setReadyRepos] = useState<{ path: string; name: string; status: string }[]>([]);
+
+  useEffect(() => {
+    fetch("/api/autonomous/ready")
+      .then((r) => r.json())
+      .then((d) => setReadyRepos(d.repos ?? []))
+      .catch(() => {});
+  }, []);
 
   const refreshPreflight = useCallback(async () => {
     if (!projectDir.trim()) {
@@ -216,6 +224,24 @@ export default function AutonomousNewDialog({
             ⍰ Help
           </button>
         </div>
+
+        {readyRepos.length > 0 && (
+          <div>
+            <div className="mb-1 text-xs text-neutral-400">Your autonomous-capable repos — click to load:</div>
+            <div className="flex flex-wrap gap-1.5">
+              {readyRepos.map((r) => (
+                <button
+                  key={r.path}
+                  onClick={() => setProjectDir(r.path)}
+                  title={r.path}
+                  className={`rounded border px-2 py-0.5 text-xs hover:border-blue-500 ${projectDir === r.path ? "border-blue-500 bg-blue-950/40 text-blue-200" : "border-neutral-700 bg-neutral-800 text-neutral-200"}`}
+                >
+                  ⚙ {r.name} <span className="text-neutral-500">· {r.status}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         <label className="block" title={HINTS.projectDir}>
           <span className="text-neutral-300">Project directory (a git repo)<Info text={HINTS.projectDir} /></span>

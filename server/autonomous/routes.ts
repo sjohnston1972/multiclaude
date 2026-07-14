@@ -9,6 +9,8 @@ import { prepareLaunch } from "./launch.js";
 import { scaffoldProject } from "./scaffold.js";
 import { appendDiscipline } from "./discipline.js";
 import { writePlanAuthoringPrompt, buildDraftPlanCommand } from "./planAuthoring.js";
+import { listAutonomousRepos } from "./discovery.js";
+import { readState } from "../stateStore.js";
 import type { SessionManager } from "../sessionManager.js";
 
 /**
@@ -153,6 +155,18 @@ export function registerAutonomousRoutes(app: FastifyInstance, sessions?: Sessio
       return { error: `Won't overwrite existing ${result.conflict} — edit it instead.` };
     }
     return result;
+  });
+
+  // Autonomous-capable repos among the user's recent folders (for the dialog quick-pick).
+  app.get("/api/autonomous/ready", async () => {
+    const existing = readState().recentFolders.filter((f) => {
+      try {
+        return fs.statSync(f).isDirectory();
+      } catch {
+        return false;
+      }
+    });
+    return { repos: listAutonomousRepos(existing) };
   });
 
   app.get("/api/autonomous", async () => listTabs());

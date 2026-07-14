@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { readState } from "./stateStore.js";
+import { autonomousStatus } from "./autonomous/discovery.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -78,6 +79,10 @@ export function registerLauncherRoutes(app: FastifyInstance): void {
       return { error: `Can't read that folder (access denied): ${resolved}` };
     }
 
+    // Subset of the listed dirs that are autonomous-capable (have a PLAN.md), so
+    // the browser can badge them.
+    const autonomous = dirs.filter((name) => autonomousStatus(path.join(resolved, name)).status !== "none");
+
     const parent = path.dirname(resolved);
     return {
       path: resolved,
@@ -85,6 +90,7 @@ export function registerLauncherRoutes(app: FastifyInstance): void {
       home: os.homedir(),
       dirs,
       drives: [],
+      autonomous,
       recent: readState().recentFolders.filter((f) => fs.existsSync(f)),
     };
   });
