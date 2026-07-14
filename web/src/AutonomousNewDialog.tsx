@@ -50,6 +50,11 @@ const HINTS = {
     "Create a PROGRESS.md from the standard header and commit it before launch, so the working tree is clean at the rollback tag. Only offered when PROGRESS.md is missing.",
 } as const;
 
+/** Derive a valid kebab-case task name from a folder name. */
+function kebab(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "");
+}
+
 /** A hoverable ⓘ marker carrying a rich tooltip. */
 function Info({ text }: { text: string }) {
   return (
@@ -264,7 +269,10 @@ export default function AutonomousNewDialog({
               {readyRepos.map((r) => (
                 <button
                   key={r.path}
-                  onClick={() => setProjectDir(r.path)}
+                  onClick={() => {
+                    setProjectDir(r.path);
+                    if (!taskName.trim()) setTaskName(kebab(r.name));
+                  }}
                   title={r.path}
                   className={`rounded border px-2 py-0.5 text-xs hover:border-blue-500 ${projectDir === r.path ? "border-blue-500 bg-blue-950/40 text-blue-200" : "border-neutral-700 bg-neutral-800 text-neutral-200"}`}
                 >
@@ -457,7 +465,7 @@ export default function AutonomousNewDialog({
           <button
             onClick={() => void launch()}
             disabled={!canLaunch}
-            title={!pf?.canLaunch ? "Resolve the ❌ checks first" : !allWarnsAccepted ? "Accept the ⚠️ risks first" : ""}
+            title={!taskOk ? "Enter a task name first" : !pf?.canLaunch ? "Resolve the ❌ checks first" : !allWarnsAccepted ? "Accept the ⚠️ risks first" : ""}
             className="rounded bg-blue-600 px-3 py-1 text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {launching ? "Launching…" : "Launch"}
@@ -471,7 +479,7 @@ export default function AutonomousNewDialog({
           onClose={() => setBrowsing(false)}
           onPick={(folder) => {
             setProjectDir(folder);
-            if (!taskName) setTaskName(folder.split(/[\\/]/).filter(Boolean).pop()?.toLowerCase().replace(/[^a-z0-9-]+/g, "-") ?? "");
+            if (!taskName.trim()) setTaskName(kebab(folder.split(/[\\/]/).filter(Boolean).pop() ?? ""));
             setBrowsing(false);
           }}
         />
