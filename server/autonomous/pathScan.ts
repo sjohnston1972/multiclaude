@@ -47,10 +47,12 @@ function expandEnv(s: string): string | null {
 
 function looksLikePath(s: string): boolean {
   if (!/[\\/]/.test(s)) return false;
+  // Note: a leading single "/" (e.g. "/api/hello") is a URL route or POSIX example,
+  // not a Windows filesystem path — deliberately NOT treated as a path here, to
+  // avoid noisy false "outside-repo" flags on API endpoints in the plan text.
   return (
     /^\.\.[\\/]/.test(s) || // ../…
     /^[A-Za-z]:[\\/]/.test(s) || // C:\ or C:/
-    /^\//.test(s) || // /abs
     ENV_RE.test(s) || // has an env var
     /^[\w.-]+[\\/]/.test(s) // relative like server/foo.ts
   );
@@ -80,7 +82,7 @@ export function scanPlanForPaths(planText: string, repoRoot: string, addDirs: st
       raw = expanded; // fall through with the resolved string (keep displaying the resolved form)
     }
 
-    const isAbsolute = /^[A-Za-z]:[\\/]/.test(raw) || raw.startsWith("/");
+    const isAbsolute = /^[A-Za-z]:[\\/]/.test(raw); // Windows drive paths only (see looksLikePath)
     const resolvesTo = isAbsolute ? path.resolve(raw) : path.resolve(repoRoot, raw);
     const reachable = isInside(resolvesTo, repoRoot) || addDirs.some((d) => isInside(resolvesTo, d));
 

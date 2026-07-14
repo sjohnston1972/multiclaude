@@ -39,6 +39,11 @@ check("unresolved env var flagged", !!env && env.resolvesTo === null, JSON.strin
 const inRepo = find("src/index.ts");
 check("in-repo path reachable, no issue", inRepo?.reachable === true && inRepo?.issue === null, JSON.stringify(inRepo));
 
+// URL routes / POSIX-absolute tokens are NOT flagged as filesystem paths (Windows)
+const urls = scanPlanForPaths("Verify: `curl localhost:8787/api/hello` returns 200. Also check `/`.", repo, []);
+check("URL route /api/hello is not treated as a path", !urls.some((r) => r.path.includes("/api/hello")), JSON.stringify(urls.map((r) => r.path)));
+check("bare / is not treated as a path", !urls.some((r) => r.path.trim() === "/"), JSON.stringify(urls.map((r) => r.path)));
+
 // --- adding the sibling repo as an --add-dir flips it to reachable -----------
 const rows2 = scanPlanForPaths(plan, repo, ["C:/other-repo"]);
 const siblingRow2 = rows2.find((r) => r.path.toLowerCase().includes("other-repo\\lib") || r.path.toLowerCase().includes("other-repo/lib"));

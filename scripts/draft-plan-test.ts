@@ -18,7 +18,7 @@ const check = (name: string, cond: boolean, extra = "") => {
 };
 
 // --- pure builder + prompt content ------------------------------------------
-check("command runs primed interactive claude", buildDraftPlanCommand("C:\\x\\p.md") === 'claude --append-system-prompt-file "C:\\x\\p.md"');
+check("command runs primed interactive claude (no permission pestering)", buildDraftPlanCommand("C:\\x\\p.md") === 'claude --append-system-prompt-file "C:\\x\\p.md" --dangerously-skip-permissions');
 check("prompt says AUTHOR, not execute", /AUTHORING the plan/.test(PLAN_AUTHORING_PROMPT) && /NOT executing/i.test(PLAN_AUTHORING_PROMPT));
 check("prompt insists on an executable verify per step", /EXECUTABLE verify/.test(PLAN_AUTHORING_PROMPT));
 check("prompt requires a STOP boundary", /STOP boundary/.test(PLAN_AUTHORING_PROMPT));

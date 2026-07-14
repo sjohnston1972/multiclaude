@@ -47,8 +47,9 @@ How to work:
 
 Iterate with the user until they are happy. Then write PLAN.md and PROGRESS.md at
 the repo root and commit them (a single commit like "docs: autonomous-run plan").
-Finally, tell the user to return to multiclaude's "New autonomous run" dialog and
-re-run pre-flight — it will now go green, and they can Launch.`;
+Finally, tell the user to click the "⚙ Autonomous" button in multiclaude's top bar
+(pre-filled with this project) to re-run pre-flight — it will now go green, and they
+can Launch.`;
 
 /** Where the priming file is written (env-overridable so tests don't touch the real data dir). */
 function planPromptFile(): string {
@@ -63,7 +64,12 @@ export function writePlanAuthoringPrompt(): string {
   return p;
 }
 
-/** The shell command typed into the new session: interactive claude, primed to author the plan. */
+/**
+ * The shell command typed into the new session: interactive claude, primed to
+ * author the plan. Uses --dangerously-skip-permissions (matching the app's other
+ * auto-claude launches) so a present, driving user isn't pestered to approve each
+ * read/write while brainstorming their own repo.
+ */
 export function buildDraftPlanCommand(promptPath: string): string {
-  return `claude --append-system-prompt-file "${promptPath}"`;
+  return `claude --append-system-prompt-file "${promptPath}" --dangerously-skip-permissions`;
 }

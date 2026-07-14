@@ -41,6 +41,7 @@ export default function App() {
   const [showSessions, setShowSessions] = useState(false);
   const [showNew, setShowNew] = useState(false);
   const [showAutonomous, setShowAutonomous] = useState(false);
+  const [autonomousDir, setAutonomousDir] = useState(""); // last project used, to pre-fill pre-flight
   const [showSettings, setShowSettings] = useState(false);
   const [showHealth, setShowHealth] = useState(false);
   const [showBroadcast, setShowBroadcast] = useState(false);
@@ -645,6 +646,12 @@ export default function App() {
         <ToolbarButton onClick={() => setShowNew(true)} title="Open a new terminal session">
           ＋ New session
         </ToolbarButton>
+        <ToolbarButton
+          onClick={() => setShowAutonomous(true)}
+          title="Autonomous run — pre-flight & launch (re-opens pre-filled with your last project)"
+        >
+          ⚙ Autonomous
+        </ToolbarButton>
         <ToolbarButton onClick={() => setShowSessions(true)} title="All live sessions">
           Sessions
         </ToolbarButton>
@@ -744,8 +751,10 @@ export default function App() {
           onLaunched={addAutonomousTab}
           onDraftPlan={(s) => {
             addSessionTab(s); // a normal terminal tab running primed claude
+            setAutonomousDir(s.cwd ?? ""); // remember it so the top-bar button reopens here
             setShowAutonomous(false);
           }}
+          initialProjectDir={autonomousDir}
           onClose={() => setShowAutonomous(false)}
         />
       )}

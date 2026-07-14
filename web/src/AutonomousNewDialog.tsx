@@ -68,13 +68,16 @@ export default function AutonomousNewDialog({
   onLaunched,
   onDraftPlan,
   onClose,
+  initialProjectDir,
 }: {
   onLaunched: (t: LaunchedTab) => void;
   /** Open a terminal tab running primed claude to co-author PLAN.md (v2 helper). */
   onDraftPlan: (session: { id: string; title: string; cwd: string }) => void;
   onClose: () => void;
+  /** Pre-fill the project dir (e.g. reopening pre-flight from the top-bar button). */
+  initialProjectDir?: string;
 }) {
-  const [projectDir, setProjectDir] = useState("");
+  const [projectDir, setProjectDir] = useState(initialProjectDir ?? "");
   const [taskName, setTaskName] = useState("");
   const [addDirsText, setAddDirsText] = useState("");
   const [model, setModel] = useState("sonnet");
@@ -310,21 +313,40 @@ export default function AutonomousNewDialog({
                   </div>
                 </div>
               ))}
-              {pf.pathScan.length > 0 && (
-                <div className="mt-2 border-t border-neutral-800 pt-2">
-                  <div className="mb-1 text-xs text-neutral-400">PLAN.md paths</div>
-                  <table className="w-full text-[11px]">
-                    <tbody>
-                      {pf.pathScan.map((r, i) => (
-                        <tr key={i} className={r.reachable ? "text-neutral-400" : "text-amber-300"}>
-                          <td className="pr-2 font-mono">{r.path}</td>
-                          <td className="pr-2">{r.reachable ? "reachable" : (r.issue ?? "unreachable")}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
+              {pf.pathScan.length > 0 &&
+                (() => {
+                  const flagged = pf.pathScan.filter((r) => !r.reachable || r.issue);
+                  const okCount = pf.pathScan.length - flagged.length;
+                  return (
+                    <div className="mt-2 border-t border-neutral-800 pt-2">
+                      {flagged.length > 0 ? (
+                        <>
+                          <div className="mb-1 text-[11px] text-amber-300">
+                            Paths in PLAN.md that resolve <b>outside the run's sandbox</b> — grant them via Additional
+                            directories, or fix the plan:
+                          </div>
+                          <table className="w-full text-[11px]">
+                            <tbody>
+                              {flagged.map((r, i) => (
+                                <tr key={i} className="text-amber-300">
+                                  <td className="pr-2 font-mono">{r.path}</td>
+                                  <td className="pr-2">{r.issue ?? "unreachable"}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                          {okCount > 0 && (
+                            <div className="mt-1 text-[11px] text-neutral-500">+ {okCount} in-repo path(s), all reachable.</div>
+                          )}
+                        </>
+                      ) : (
+                        <div className="text-[11px] text-neutral-500">
+                          {pf.pathScan.length} path(s) referenced in PLAN.md, all reachable within the sandbox.
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
               {pf.seedable && (
                 <label className="mt-1 flex items-center gap-1 text-xs text-neutral-300" title={HINTS.seedProgress}>
                   <input type="checkbox" checked={seedProgress} onChange={(e) => setSeedProgress(e.target.checked)} />
