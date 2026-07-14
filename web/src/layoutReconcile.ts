@@ -65,6 +65,18 @@ export function countTerminalTabs(model: Model): number {
   return n;
 }
 
+/** Every renderable pane (terminal OR autonomous) — gates the home-screen overlay. */
+export function countRenderableTabs(model: Model): number {
+  let n = 0;
+  model.visitNodes((node: Node) => {
+    if (node.getType() === "tab") {
+      const c = (node as TabNode).getComponent();
+      if (c === "terminal" || c === "autonomous") n++;
+    }
+  });
+  return n;
+}
+
 /**
  * Build the model to render on load by reconciling the saved layout against
  * the sessions the server actually holds. Every live session gets a tab, so a

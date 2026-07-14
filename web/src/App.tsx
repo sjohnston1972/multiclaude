@@ -14,6 +14,7 @@ import {
 import { api, AppSettings, AppState, SessionInfo } from "./api";
 import {
   GLOBAL_LAYOUT_OPTS,
+  countRenderableTabs,
   countTerminalTabs,
   reconcileLayout,
   tabJson,
@@ -82,7 +83,7 @@ export default function App() {
     const live = await api<SessionInfo[]>("/api/sessions").catch(() => []);
     const { model: m } = reconcileLayout(layout as IJsonModel | null, live);
     setModel(m);
-    setTabCount(countTerminalTabs(m));
+    setTabCount(countRenderableTabs(m));
     api("/api/state", { method: "PUT", body: { layout: m.toJson() } }).catch(() => {});
   }, []);
 
@@ -327,7 +328,7 @@ export default function App() {
         }
         const m = Model.fromJson({ global: GLOBAL_LAYOUT_OPTS, borders: [], layout });
         setModel(m);
-        setTabCount(countTerminalTabs(m));
+        setTabCount(countRenderableTabs(m));
         persistLayout(m);
       } catch (e) {
         setError((e as Error).message);
@@ -719,7 +720,7 @@ export default function App() {
                 setDots((d) => (d[sid] ? { ...d, [sid]: false } : d));
               }
             }
-            setTabCount(countTerminalTabs(m));
+            setTabCount(countRenderableTabs(m));
             persistLayout(m);
           }}
         />
