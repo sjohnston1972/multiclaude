@@ -89,6 +89,7 @@ export default function AutonomousNewDialog({
   const [accepted, setAccepted] = useState<Record<string, boolean>>({});
   const [browsing, setBrowsing] = useState(false);
   const [browsingAddDir, setBrowsingAddDir] = useState(false);
+  const [siblings, setSiblings] = useState<{ name: string; path: string }[]>([]);
   const [launching, setLaunching] = useState(false);
   const [acting, setActing] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -177,6 +178,36 @@ export default function AutonomousNewDialog({
   };
 
   const addDirs = () => addDirsText.split(/[\n,]+/).map((s) => s.trim()).filter(Boolean);
+
+  const toggleAddDir = (p: string) =>
+    setAddDirsText((prev) => {
+      const lines = prev.split(/\n/).map((s) => s.trim()).filter(Boolean);
+      const i = lines.findIndex((l) => l.toLowerCase() === p.toLowerCase());
+      if (i >= 0) lines.splice(i, 1);
+      else lines.push(p);
+      return lines.join("\n");
+    });
+
+  // When the project changes: load its remembered --add-dir grants (pre-fill if the
+  // field is empty) and its sibling folders for the quick-pick.
+  useEffect(() => {
+    if (!projectDir.trim()) {
+      setSiblings([]);
+      return;
+    }
+    let alive = true;
+    fetch(`/api/autonomous/adddirs?projectDir=${encodeURIComponent(projectDir.trim())}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (!alive) return;
+        setSiblings(d.siblings ?? []);
+        setAddDirsText((prev) => (prev.trim() ? prev : (d.remembered ?? []).join("\n")));
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [projectDir]);
 
   const warnIds = (pf?.checks ?? []).filter((c) => c.level === "warn").map((c) => c.id);
   const allWarnsAccepted = warnIds.every((id) => accepted[id]);
@@ -285,9 +316,30 @@ export default function AutonomousNewDialog({
             value={addDirsText}
             onChange={(e) => setAddDirsText(e.target.value)}
             rows={2}
-            placeholder="e.g. C:\cloudflare_projects\skills-foundry — or click “Browse & add”"
+            placeholder="e.g. C:\cloudflare_projects\skills-foundry — or click a sibling below / “Browse & add”"
             className="mt-1 w-full rounded border border-neutral-700 bg-neutral-950 px-2 py-1 font-mono text-xs text-neutral-100"
           />
+          {siblings.length > 0 && (
+            <div className="mt-1">
+              <div className="mb-0.5 text-[11px] text-neutral-500">Sibling folders — click to grant / revoke:</div>
+              <div className="flex flex-wrap gap-1">
+                {siblings.map((s) => {
+                  const added = addDirs().some((d) => d.toLowerCase() === s.path.toLowerCase());
+                  return (
+                    <button
+                      key={s.path}
+                      onClick={() => toggleAddDir(s.path)}
+                      title={s.path}
+                      className={`rounded border px-1.5 py-0.5 text-[11px] ${added ? "border-blue-500 bg-blue-950/40 text-blue-200" : "border-neutral-700 bg-neutral-800 text-neutral-300 hover:border-neutral-500"}`}
+                    >
+                      {added ? "✓ " : "＋ "}
+                      {s.name}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
 
         <label className="block" title={HINTS.extraAllow}>

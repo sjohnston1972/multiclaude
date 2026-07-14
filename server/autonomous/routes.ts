@@ -10,7 +10,24 @@ import { scaffoldProject } from "./scaffold.js";
 import { appendDiscipline } from "./discipline.js";
 import { writePlanAuthoringPrompt, buildDraftPlanCommand } from "./planAuthoring.js";
 import { listAutonomousRepos } from "./discovery.js";
+import { readAddDirs, writeAddDirs } from "./addDirsStore.js";
 import { readState } from "../stateStore.js";
+
+/** Sibling folders of a project dir (its parent's other children) — quick-pick candidates for --add-dir. */
+function siblingDirs(projectDir: string): { name: string; path: string }[] {
+  try {
+    const resolved = path.resolve(projectDir);
+    const parent = path.dirname(resolved);
+    const self = path.basename(resolved).toLowerCase();
+    return fs
+      .readdirSync(parent, { withFileTypes: true })
+      .filter((e) => e.isDirectory() && e.name.toLowerCase() !== self && !e.name.startsWith("."))
+      .map((e) => ({ name: e.name, path: path.join(parent, e.name) }))
+      .slice(0, 60);
+  } catch {
+    return [];
+  }
+}
 import type { SessionManager } from "../sessionManager.js";
 
 /**
@@ -123,6 +140,8 @@ export function registerAutonomousRoutes(app: FastifyInstance, sessions?: Sessio
       return { error: `Launch setup failed: ${(err as Error).message}` };
     }
 
+    writeAddDirs(projectDir, addDirs); // remember these grants for next time this project launches
+
     return createTab({
       taskName,
       projectDir,
@@ -155,6 +174,13 @@ export function registerAutonomousRoutes(app: FastifyInstance, sessions?: Sessio
       return { error: `Won't overwrite existing ${result.conflict} — edit it instead.` };
     }
     return result;
+  });
+
+  // Remembered --add-dir grants for a project + its sibling folders (quick-pick candidates).
+  app.get("/api/autonomous/adddirs", async (req) => {
+    const projectDir = ((req.query as { projectDir?: string }).projectDir ?? "").trim();
+    if (!projectDir) return { remembered: [], siblings: [] };
+    return { remembered: readAddDirs(projectDir), siblings: siblingDirs(projectDir) };
   });
 
   // Autonomous-capable repos among the user's recent folders (for the dialog quick-pick).

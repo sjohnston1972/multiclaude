@@ -42,6 +42,7 @@ process.env.MULTICLAUDE_CLAUDE_MD = goodMd;
 // prepareLaunch's result rather than racing the run's first DONE write.
 process.env.STUB_SCENARIO = "ok";
 process.env.MULTICLAUDE_AUTONOMOUS_FILE = path.join(os.tmpdir(), `mc-launch-records-${process.pid}.json`);
+process.env.MULTICLAUDE_ADDDIRS_FILE = path.join(os.tmpdir(), `mc-launch-adddirs-${process.pid}.json`);
 __setSpawnOverride({ command: process.execPath, args: [stub] });
 
 const app = Fastify();
