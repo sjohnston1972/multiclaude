@@ -32,6 +32,33 @@ interface Preflight {
 
 const ICON = { ok: "✅", warn: "⚠️", fail: "❌" } as const;
 
+/** Plain-language hover details for every setting (native multi-line tooltips — no extra deps). */
+const HINTS = {
+  projectDir:
+    "The git repository this run works in. Must already be a git repo. The run is sandboxed to this folder (plus any Additional directories) — pre-flight flags any PLAN.md path that points outside it.",
+  taskName:
+    "A short kebab-case id for this run. Becomes the state-dir name (.multiclaude/<task>/) and the rollback tag (multiclaude-launch-<task>-<time>). Keep it unique per repo.",
+  model:
+    "Which Claude model runs each turn. 'sonnet' is the cost-effective default for long or overnight runs; 'opus' is stronger but pricier. Each resolves to the CLI's current alias.",
+  budget:
+    "Hard per-invocation spend ceiling (maps to --max-budget-usd). This is the ONLY hard cost cap — there is no turn cap; the one-step-per-turn bound comes from the plan + discipline. Leave blank for no limit.",
+  addDirs:
+    "Extra folders the run may read/write beyond the repo — each becomes a --add-dir grant. Use these for a sibling repo or monorepo package a step legitimately needs. This is what turns a red path-scan row green.",
+  extraAllow:
+    "Extra Bash allow-rules appended to the safe default (git / npm / npx / node). Add these if your PLAN.md's verify commands call other tools, e.g. Bash(pytest *) or Bash(cargo *). A denied command is reported, not hung — but the step can't run until it's allowed.",
+  seedProgress:
+    "Create a PROGRESS.md from the standard header and commit it before launch, so the working tree is clean at the rollback tag. Only offered when PROGRESS.md is missing.",
+} as const;
+
+/** A hoverable ⓘ marker carrying a rich tooltip. */
+function Info({ text }: { text: string }) {
+  return (
+    <span title={text} aria-label={text} className="ml-1 cursor-help text-neutral-500 hover:text-neutral-300">
+      ⓘ
+    </span>
+  );
+}
+
 export interface LaunchedTab {
   id: string;
   taskName: string;
@@ -162,8 +189,8 @@ export default function AutonomousNewDialog({
           </button>
         </div>
 
-        <label className="block">
-          <span className="text-neutral-300">Project directory (a git repo)</span>
+        <label className="block" title={HINTS.projectDir}>
+          <span className="text-neutral-300">Project directory (a git repo)<Info text={HINTS.projectDir} /></span>
           <div className="mt-1 flex gap-2">
             <input value={projectDir} onChange={(e) => setProjectDir(e.target.value)} placeholder="C:\path\to\repo" className="flex-1 rounded border border-neutral-700 bg-neutral-950 px-2 py-1 font-mono text-neutral-100" />
             <button onClick={() => setBrowsing(true)} className="rounded bg-neutral-700 px-3 text-neutral-100 hover:bg-neutral-600">
@@ -172,33 +199,33 @@ export default function AutonomousNewDialog({
           </div>
         </label>
 
-        <label className="block">
-          <span className="text-neutral-300">Task name (kebab-case — becomes the state-dir name)</span>
+        <label className="block" title={HINTS.taskName}>
+          <span className="text-neutral-300">Task name (kebab-case — becomes the state-dir name)<Info text={HINTS.taskName} /></span>
           <input value={taskName} onChange={(e) => setTaskName(e.target.value)} placeholder="my-feature" className="mt-1 w-full rounded border border-neutral-700 bg-neutral-950 px-2 py-1 font-mono text-neutral-100" />
           {taskName && !taskOk && <span className="text-xs text-red-400">Only lowercase letters, numbers, and dashes.</span>}
         </label>
 
         <div className="grid grid-cols-2 gap-3">
-          <label className="block">
-            <span className="text-neutral-300">Model</span>
+          <label className="block" title={HINTS.model}>
+            <span className="text-neutral-300">Model<Info text={HINTS.model} /></span>
             <select value={model} onChange={(e) => setModel(e.target.value)} className="mt-1 w-full rounded border border-neutral-700 bg-neutral-950 px-2 py-1 text-neutral-100">
               <option value="sonnet">sonnet</option>
               <option value="opus">opus</option>
             </select>
           </label>
-          <label className="block">
-            <span className="text-neutral-300">Budget cap USD (optional)</span>
+          <label className="block" title={HINTS.budget}>
+            <span className="text-neutral-300">Budget cap USD (optional)<Info text={HINTS.budget} /></span>
             <input value={budget} onChange={(e) => setBudget(e.target.value)} placeholder="e.g. 5" inputMode="decimal" className="mt-1 w-full rounded border border-neutral-700 bg-neutral-950 px-2 py-1 text-neutral-100" />
           </label>
         </div>
 
-        <label className="block">
-          <span className="text-neutral-300">Additional directories (one per line — each becomes --add-dir)</span>
+        <label className="block" title={HINTS.addDirs}>
+          <span className="text-neutral-300">Additional directories (one per line — each becomes --add-dir)<Info text={HINTS.addDirs} /></span>
           <textarea value={addDirsText} onChange={(e) => setAddDirsText(e.target.value)} rows={2} className="mt-1 w-full rounded border border-neutral-700 bg-neutral-950 px-2 py-1 font-mono text-xs text-neutral-100" />
         </label>
 
-        <label className="block">
-          <span className="text-neutral-300">Extra Bash allow-rules (optional — widens the default git/npm/npx/node scope)</span>
+        <label className="block" title={HINTS.extraAllow}>
+          <span className="text-neutral-300">Extra Bash allow-rules (optional — widens the default git/npm/npx/node scope)<Info text={HINTS.extraAllow} /></span>
           <input value={extraAllow} onChange={(e) => setExtraAllow(e.target.value)} placeholder="Bash(pytest *) Bash(cargo *)" className="mt-1 w-full rounded border border-neutral-700 bg-neutral-950 px-2 py-1 font-mono text-xs text-neutral-100" />
         </label>
 
@@ -264,9 +291,10 @@ export default function AutonomousNewDialog({
                 </div>
               )}
               {pf.seedable && (
-                <label className="mt-1 flex items-center gap-1 text-xs text-neutral-300">
+                <label className="mt-1 flex items-center gap-1 text-xs text-neutral-300" title={HINTS.seedProgress}>
                   <input type="checkbox" checked={seedProgress} onChange={(e) => setSeedProgress(e.target.checked)} />
                   Seed PROGRESS.md and commit it before launch
+                  <Info text={HINTS.seedProgress} />
                 </label>
               )}
             </div>

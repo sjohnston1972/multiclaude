@@ -247,3 +247,65 @@ Every `[NEEDS YOUR CALL]` in this document is now answered. Recorded so nothing 
 - **New guard added at Steven's request:** a **state-file integrity check** at each turn boundary —
   if `PLAN.md`/`PROGRESS.md` go missing or unreadable mid-run, the supervisor stops with `state =
   error` and the reason, instead of invoking Claude into a void. Folded into plan Step 3.
+
+---
+
+## Proposed scope item — "Draft a plan with Claude" helper (v2)
+
+**Status:** approved to add to scope (Steven, 2026-07-14). Recommendation confirmed: **enabled by
+default, flagged "Recommended"** in the launch dialog. Build is pending answers to the sub-questions
+at the end — I will not write code for it until those are settled (no-creep rule).
+
+### The gap it closes
+
+A good `PLAN.md` is a complex markdown document, and authoring it is an interactive brainstorming
+activity with Claude — that does **not** change with the autonomous workflow (spec R11 + §7:
+automatic PLAN.md generation is explicitly out of scope). What v1 ships is only the *empty*
+scaffold (R12): the template skeleton with `<placeholders>`, not a real plan. So today the flow has
+a seam — you draft `PLAN.md` in a normal terminal tab, then open a separate Autonomous tab pointed
+at that repo. This item bridges that seam **without** crossing the "no autonomous plan generation"
+line: the human stays in the loop; this is *assisted authoring*, not unattended authoring.
+
+### What it is
+
+In the new-autonomous-run dialog, when `PLAN.md` is missing (pre-flight ❌), the primary offered
+action becomes **"Draft a plan with Claude"** — the recommended default — sitting *above* the plain
+"Scaffold PLAN.md + PROGRESS.md" button, which stays as the manual/advanced fallback. Choosing it
+opens an interactive brainstorming session in the target repo, primed to produce a real `PLAN.md`
+that satisfies the plan-template rules (one step = one commit, every step ends in an executable
+verify, a STOP boundary). When the human is happy and `PLAN.md` is committed, pre-flight re-runs and
+goes green, and Launch proceeds as normal.
+
+### Recommendation (opinionated)
+
+- **Enabled by default and flagged "Recommended."** A run is only as safe as its plan; nudging the
+  user toward assisted authoring rather than a blank skeleton is the single highest-leverage nudge
+  in the whole feature. The empty scaffold remains for people who already know exactly what they
+  want.
+- **Interactive, never automatic.** The helper opens a session the human drives — it does not
+  silently emit a plan and launch. This preserves §7 and the core discipline: a plan produced with
+  no human judgment is exactly the 3 a.m. danger the feature exists to prevent.
+
+### Trade-offs I am accepting
+
+- One more path through the dialog (draft vs scaffold vs bring-your-own) — mitigated by making the
+  recommended default obvious and the others clearly secondary.
+- It leans on the existing terminal/session infrastructure rather than inventing a new chat surface
+  (see sub-question 1) — consistent with the project non-goal "the terminal IS the interface; not an
+  AI wrapper."
+
+### Sub-questions to resolve before I build — **[NEEDS YOUR CALL]**
+
+1. **Where does the brainstorming happen?** My recommendation: spawn a **normal multiclaude terminal
+   tab** running `claude` in the repo (reuse the whole existing session stack; honours "the terminal
+   is the interface"), rather than an embedded bespoke chat pane. Confirm, or say you want it
+   in-dialog.
+2. **How is it primed?** Recommendation: launch `claude` with an appended plan-authoring system
+   prompt + attach `docs/specs/plan-template.md`, so it opens already knowing the rules (executable
+   verify per step, ≤3 files per step, STOP boundary). Any priming content you want changed?
+3. **Hand-off back to launch.** Recommendation: keep it file-based — the session writes and commits
+   `PLAN.md`; the launch dialog just re-runs pre-flight and detects it (simplest, no coupling).
+   Acceptable, or do you want a tighter "plan ready → jump back to Launch" handshake?
+4. **Scope of assistance.** Just the plan prose, or should it also help choose the invariants block
+   and propose the per-step verify commands? Recommendation: yes to both — the verify commands are
+   where unattended runs live or die, so helping author them is the most valuable part.
