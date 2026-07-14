@@ -54,12 +54,38 @@ Deterministic suite (no real `claude`, no tokens):
 | R5 controls | `npx tsx scripts/controls-test.ts` |
 | R12 scaffold | `npx tsx scripts/scaffold-test.ts` |
 | v2 draft-plan helper | `npx tsx scripts/draft-plan-test.ts` |
+| v2 repo tagging / discovery | `npx tsx scripts/autonomous-discovery-test.ts` |
 
 Live (needs an authenticated `claude`, spends a few cents) — the B2 acceptance line:
 
 | Area | Verify command |
 |---|---|
 | Pinned invocation lands a commit | `node scripts/claude-invoke-test.mjs` |
+
+## v2 additions (post-v1, driven by dogfooding)
+
+Built and deployed after the v1 plan, each as its own committed + verified change:
+
+- **Draft-a-plan helper** — the missing-PLAN ❌ row offers a recommended "Draft a plan with Claude ★"
+  that opens a normal terminal tab running primed interactive `claude` (`--append-system-prompt-file`,
+  `--dangerously-skip-permissions` so it doesn't pester), file-based hand-off back to pre-flight.
+- **Discipline-block append** (R6.6) and **scaffold** offered as actions from the launch dialog, so a
+  new session can create PLAN.md / PROGRESS.md / the CLAUDE.md discipline block.
+- **Repo tagging** — repos with the state files are badged `ready`/`completed`/`drafting` in the launch
+  dialog quick-pick, home-screen tiles, and the folder browser (`server/autonomous/discovery.ts`,
+  `GET /api/autonomous/ready`).
+- **Completion clarity** — the elapsed clock freezes on a terminal state (server `finishedAt`) and a
+  loud state banner (done/blocked/error/paused/sleeping) removes the "did it finish?" ambiguity.
+- **Blockers false-positive fix** — `- (none)` / `N/A` / `no blockers yet` placeholders no longer trip
+  the Blockers banner or mis-classify a done run as blocked.
+- **Path-scan polish** — URL routes (`/api/hello`) are no longer flagged as filesystem paths; the panel
+  shows only paths needing attention.
+- **Markdown side pane** — PROGRESS.md / PLAN.md render with a dependency-free markdown component.
+- **Cache-hit %** in the status strip — share of input tokens served from the prompt cache, from each
+  turn's `result.usage`; a live gauge of resume efficiency.
+- **Persistent "⚙ Autonomous" top-bar button** — reopens pre-flight pre-filled with the last project.
+
+Server default is now LAN mode on this machine (persistent env vars), per operator preference.
 
 ## Pending human checks (build ≠ working)
 
