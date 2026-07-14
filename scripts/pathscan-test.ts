@@ -44,10 +44,18 @@ const urls = scanPlanForPaths("Verify: `curl localhost:8787/api/hello` returns 2
 check("URL route /api/hello is not treated as a path", !urls.some((r) => r.path.includes("/api/hello")), JSON.stringify(urls.map((r) => r.path)));
 check("bare / is not treated as a path", !urls.some((r) => r.path.trim() === "/"), JSON.stringify(urls.map((r) => r.path)));
 
-// --- adding the sibling repo as an --add-dir flips it to reachable -----------
-const rows2 = scanPlanForPaths(plan, repo, ["C:/other-repo"]);
+// --- URLs are not filesystem paths (the https:// -> s:/ false positive) -----
+const urlPlan = "Auth via `https://authpak.foundry-ns.com/login?redirect_uri=<current>` and http://x/y.";
+const urlRows = scanPlanForPaths(urlPlan, repo, []);
+check("https:// URL not flagged as a path", !urlRows.some((r) => r.path.includes("authpak")), JSON.stringify(urlRows.map((r) => r.path)));
+check("bare http:// URL not flagged", !urlRows.some((r) => r.path.includes("://")), JSON.stringify(urlRows.map((r) => r.path)));
+
+// --- adding the sibling repo as an --add-dir flips it to reachable + clears the flag
+const rows2 = scanPlanForPaths(plan, repo, ["C:/other-repo", "C:/repo/.."]);
 const siblingRow2 = rows2.find((r) => r.path.toLowerCase().includes("other-repo\\lib") || r.path.toLowerCase().includes("other-repo/lib"));
 check("sibling reachable once its parent is an --add-dir", siblingRow2?.reachable === true, JSON.stringify(siblingRow2));
+const traversal2 = rows2.find((r) => r.path.startsWith(".."));
+check("../ path covered by an --add-dir is no longer flagged", traversal2 == null || (traversal2.reachable && traversal2.issue === null), JSON.stringify(traversal2));
 
 // --- a resolvable env var resolves and is judged on its target --------------
 process.env.MC_TEST_DIR = "C:/repo/generated";

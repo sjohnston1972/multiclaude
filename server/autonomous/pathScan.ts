@@ -47,6 +47,7 @@ function expandEnv(s: string): string | null {
 
 function looksLikePath(s: string): boolean {
   if (!/[\\/]/.test(s)) return false;
+  if (s.includes("://")) return false; // a URL scheme (http://, wss://…), not a filesystem path
   // Note: a leading single "/" (e.g. "/api/hello") is a URL route or POSIX example,
   // not a Windows filesystem path — deliberately NOT treated as a path here, to
   // avoid noisy false "outside-repo" flags on API endpoints in the plan text.
@@ -68,7 +69,9 @@ function candidatePaths(planText: string): string[] {
   for (const m of planText.matchAll(/(?:\.\.[\\/]|[A-Za-z]:[\\/]|\$\{?\w+\}?[\\/]|%\w+%[\\/])[^\s`)"']+/g)) {
     set.add(m[0]);
   }
-  return [...set];
+  // Drop anything that's actually a URL — the drive-letter regex above catches the
+  // "s:/" inside "https://", which is a scheme, not a path.
+  return [...set].filter((s) => !s.includes("://"));
 }
 
 export function scanPlanForPaths(planText: string, repoRoot: string, addDirs: string[] = []): PathScanRow[] {
@@ -86,10 +89,9 @@ export function scanPlanForPaths(planText: string, repoRoot: string, addDirs: st
     const resolvesTo = isAbsolute ? path.resolve(raw) : path.resolve(repoRoot, raw);
     const reachable = isInside(resolvesTo, repoRoot) || addDirs.some((d) => isInside(resolvesTo, d));
 
-    let issue: PathIssue = null;
-    if (raw.startsWith("..")) issue = "traversal";
-    else if (isAbsolute && !reachable) issue = "outside-repo";
-    else if (!reachable) issue = "outside-repo";
+    // Only flag paths that are actually unreachable — a `..` path covered by an
+    // --add-dir is fine and shouldn't stay flagged after the user grants it.
+    const issue: PathIssue = reachable ? null : raw.startsWith("..") ? "traversal" : "outside-repo";
 
     return { path: raw, resolvesTo, reachable, issue };
   });
