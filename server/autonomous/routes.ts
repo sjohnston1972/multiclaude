@@ -8,13 +8,36 @@ import { runPreflight } from "./preflight.js";
 import { prepareLaunch } from "./launch.js";
 import { scaffoldProject } from "./scaffold.js";
 import { appendDiscipline } from "./discipline.js";
+import { writePlanAuthoringPrompt, buildDraftPlanCommand } from "./planAuthoring.js";
+import type { SessionManager } from "../sessionManager.js";
 
 /**
  * REST API for autonomous tabs. Follows multiclaude's envelope: on failure
  * `reply.code(4xx); return { error: "<plain English>" }`; on success return the
  * resource JSON.
  */
-export function registerAutonomousRoutes(app: FastifyInstance): void {
+export function registerAutonomousRoutes(app: FastifyInstance, sessions?: SessionManager): void {
+  // Open a normal interactive claude session, primed to co-author a PLAN.md (v2
+  // "Draft a plan with Claude" helper). Assisted authoring — the human drives it;
+  // when they commit PLAN.md, pre-flight re-detects it and Launch enables.
+  app.post("/api/autonomous/draft-plan", async (req, reply) => {
+    if (!sessions) {
+      reply.code(503);
+      return { error: "Session manager unavailable." };
+    }
+    const body = (req.body ?? {}) as { projectDir?: string };
+    const projectDir = (body.projectDir ?? "").trim();
+    try {
+      if (!projectDir || !fs.statSync(projectDir).isDirectory()) throw new Error();
+    } catch {
+      reply.code(400);
+      return { error: `Project directory doesn't exist: ${projectDir}` };
+    }
+    const promptPath = writePlanAuthoringPrompt();
+    const session = sessions.create({ cwd: projectDir, initialCommand: buildDraftPlanCommand(promptPath) });
+    return sessions.info(session);
+  });
+
   // Create a tab and start its supervisor. (Step 15 routes this through the full
   // launch sequence — tag, state dir, gitignore — gated on pre-flight.)
   app.post("/api/autonomous", async (req, reply) => {

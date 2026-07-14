@@ -66,9 +66,12 @@ export interface LaunchedTab {
 
 export default function AutonomousNewDialog({
   onLaunched,
+  onDraftPlan,
   onClose,
 }: {
   onLaunched: (t: LaunchedTab) => void;
+  /** Open a terminal tab running primed claude to co-author PLAN.md (v2 helper). */
+  onDraftPlan: (session: { id: string; title: string; cwd: string }) => void;
   onClose: () => void;
 }) {
   const [projectDir, setProjectDir] = useState("");
@@ -134,6 +137,28 @@ export default function AutonomousNewDialog({
         body: JSON.stringify({ projectDir: projectDir.trim() }),
       });
       await refreshPreflight();
+    } finally {
+      setActing(null);
+    }
+  };
+  const draftPlan = async () => {
+    if (!projectDir.trim()) return;
+    setActing("draft");
+    setError(null);
+    try {
+      const res = await fetch("/api/autonomous/draft-plan", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ projectDir: projectDir.trim() }),
+      });
+      const body = await res.json();
+      if (!res.ok) {
+        setError(body.error ?? "Couldn't start the plan-drafting session");
+        return;
+      }
+      onDraftPlan(body); // opens a claude terminal tab; App closes this dialog
+    } catch (e) {
+      setError((e as Error).message);
     } finally {
       setActing(null);
     }
@@ -257,14 +282,24 @@ export default function AutonomousNewDialog({
                       </button>
                     )}
                     {c.id === "plan" && c.level === "fail" && (
-                      <button
-                        onClick={() => void scaffoldPlan()}
-                        disabled={acting !== null}
-                        title="Create a PLAN.md + PROGRESS.md from the template — you then fill in the plan"
-                        className="rounded bg-neutral-700 px-2 py-0.5 text-neutral-100 hover:bg-neutral-600 disabled:opacity-50"
-                      >
-                        {acting === "scaffold" ? "Scaffolding…" : "Scaffold PLAN.md + PROGRESS.md"}
-                      </button>
+                      <>
+                        <button
+                          onClick={() => void draftPlan()}
+                          disabled={acting !== null}
+                          title="Open a Claude session in this repo, primed to co-author a PLAN.md with you (executable verify per step, invariants, STOP boundary). You commit it, then re-run pre-flight. Recommended."
+                          className="rounded bg-blue-600 px-2 py-0.5 text-white hover:bg-blue-500 disabled:opacity-50"
+                        >
+                          {acting === "draft" ? "Opening…" : "Draft a plan with Claude ★"}
+                        </button>
+                        <button
+                          onClick={() => void scaffoldPlan()}
+                          disabled={acting !== null}
+                          title="Write an empty PLAN.md + PROGRESS.md skeleton you fill in yourself (advanced / if you already know the plan)"
+                          className="rounded bg-neutral-700 px-2 py-0.5 text-neutral-100 hover:bg-neutral-600 disabled:opacity-50"
+                        >
+                          {acting === "scaffold" ? "Scaffolding…" : "Scaffold empty template"}
+                        </button>
+                      </>
                     )}
                     {c.level === "warn" && (
                       <label className="flex items-center gap-1 text-amber-300">

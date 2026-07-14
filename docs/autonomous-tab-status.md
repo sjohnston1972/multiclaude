@@ -53,6 +53,7 @@ Deterministic suite (no real `claude`, no tokens):
 | R7 launch sequence | `npx tsx scripts/launch-test.ts` |
 | R5 controls | `npx tsx scripts/controls-test.ts` |
 | R12 scaffold | `npx tsx scripts/scaffold-test.ts` |
+| v2 draft-plan helper | `npx tsx scripts/draft-plan-test.ts` |
 
 Live (needs an authenticated `claude`, spends a few cents) — the B2 acceptance line:
 

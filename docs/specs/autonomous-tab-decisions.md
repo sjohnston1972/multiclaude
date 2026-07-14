@@ -252,9 +252,13 @@ Every `[NEEDS YOUR CALL]` in this document is now answered. Recorded so nothing 
 
 ## Proposed scope item — "Draft a plan with Claude" helper (v2)
 
-**Status:** approved to add to scope (Steven, 2026-07-14). Recommendation confirmed: **enabled by
-default, flagged "Recommended"** in the launch dialog. Build is pending answers to the sub-questions
-at the end — I will not write code for it until those are settled (no-creep rule).
+**Status:** **BUILT (2026-07-14).** Steven approved the item and all four recommendations as-is
+("happy with that, build the helper"). Shipped: `POST /api/autonomous/draft-plan` opens a normal
+terminal tab running primed interactive `claude` in the repo (`--append-system-prompt-file` with the
+plan-authoring prompt), file-based hand-off (commit PLAN.md → re-run pre-flight), and the prompt also
+helps author the invariants + per-step verify commands. The launch dialog offers it as the
+**recommended** action (★, blue) above the plain "Scaffold empty template" fallback on a missing-PLAN
+❌. Verified: `npx tsx scripts/draft-plan-test.ts`.
 
 ### The gap it closes
 
@@ -294,7 +298,7 @@ goes green, and Launch proceeds as normal.
   (see sub-question 1) — consistent with the project non-goal "the terminal IS the interface; not an
   AI wrapper."
 
-### Sub-questions to resolve before I build — **[NEEDS YOUR CALL]**
+### Sub-questions — **RESOLVED** (all recommendations accepted, 2026-07-14)
 
 1. **Where does the brainstorming happen?** My recommendation: spawn a **normal multiclaude terminal
    tab** running `claude` in the repo (reuse the whole existing session stack; honours "the terminal

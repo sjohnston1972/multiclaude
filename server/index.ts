@@ -287,7 +287,7 @@ app.delete("/api/sessions/:id", async (req, reply) => {
 
 registerLauncherRoutes(app);
 registerImageRoutes(app);
-registerAutonomousRoutes(app);
+registerAutonomousRoutes(app, sessions);
 loadPersisted(); // bring back autonomous tabs from a previous run (offered for relaunch)
 pruneOldImages();
 // Prune again daily so a long-running (autostarted) server doesn't hoard images.

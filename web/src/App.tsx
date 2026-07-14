@@ -742,6 +742,10 @@ export default function App() {
       {showAutonomous && (
         <AutonomousNewDialog
           onLaunched={addAutonomousTab}
+          onDraftPlan={(s) => {
+            addSessionTab(s); // a normal terminal tab running primed claude
+            setShowAutonomous(false);
+          }}
           onClose={() => setShowAutonomous(false)}
         />
       )}
