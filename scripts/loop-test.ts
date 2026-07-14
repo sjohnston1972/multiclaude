@@ -50,7 +50,12 @@ check(
 );
 check("parseResetTime falls back to +1h when unparseable", parseResetTime("no time here", now) === now + 3600_000);
 check("hasBlockers false on empty template section", !hasBlockers("## Blockers\n\n<!-- write here -->\n"));
+check("hasBlockers false on '- (none)' placeholder", !hasBlockers("## Blockers\n\n- (none)\n"));
+check("hasBlockers false on 'None.' placeholder", !hasBlockers("## Blockers\nNone.\n"));
+check("hasBlockers false on 'N/A' placeholder", !hasBlockers("## Blockers\nN/A\n"));
+check("hasBlockers false on 'No blockers yet'", !hasBlockers("## Blockers\n\nNo blockers yet\n"));
 check("hasBlockers true on populated section", hasBlockers("## Blockers\n- real problem\n"));
+check("hasBlockers true on a real 'no'-starting blocker", hasBlockers("## Blockers\n- No API key for the service; three options: (a)…\n"));
 
 // --- (a) usage limit → sleeping ---------------------------------------------
 {

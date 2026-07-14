@@ -46,6 +46,23 @@ export function parseResetTime(text: string, now: number): number {
  * single most important signal in the feature (R4), so it must not fire on the
  * seeded empty section.
  */
+/** Placeholders Claude writes to mean "no blockers" — must NOT trip the banner. */
+const NO_BLOCKERS = new Set([
+  "none",
+  "n a",
+  "na",
+  "no",
+  "no blocker",
+  "no blockers",
+  "no blocker yet",
+  "no blockers yet",
+  "nothing",
+  "nothing yet",
+  "none yet",
+  "none so far",
+  "tbd",
+]);
+
 export function hasBlockers(progressText: string): boolean {
   const start = progressText.search(/^##\s+Blockers\b/m);
   if (start === -1) return false;
@@ -53,5 +70,8 @@ export function hasBlockers(progressText: string): boolean {
   const next = after.search(/^##\s/m); // end at the next heading, if any
   const section = next === -1 ? after : after.slice(0, next);
   const body = section.replace(/<!--[\s\S]*?-->/g, "").trim(); // drop HTML-comment guidance
-  return body.length > 0;
+  if (!body) return false;
+  // "- (none)", "None.", "N/A", "no blockers yet" etc. are not real blockers.
+  const norm = body.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  return !NO_BLOCKERS.has(norm);
 }
