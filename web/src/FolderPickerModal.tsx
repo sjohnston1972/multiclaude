@@ -8,6 +8,7 @@ interface BrowseResult {
   home: string;
   dirs: string[];
   drives: string[];
+  autonomous?: string[]; // subset of dirs that have autonomous-run state files
   recent: string[];
 }
 
@@ -107,9 +108,17 @@ export default function FolderPickerModal({
                     <button
                       key={d}
                       onClick={() => load(`${browse.path}\\${d}`)}
-                      className="block w-full truncate px-3 py-1.5 text-left hover:bg-neutral-800"
+                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-neutral-800"
                     >
-                      📁 {d}
+                      <span className="truncate">📁 {d}</span>
+                      {browse.autonomous?.includes(d) && (
+                        <span
+                          title="Autonomous-capable — has PLAN.md / PROGRESS.md"
+                          className="ml-auto shrink-0 rounded bg-blue-900/70 px-1.5 py-0.5 font-mono text-[10px] text-blue-300"
+                        >
+                          ⚙
+                        </span>
+                      )}
                     </button>
                   ))
                 )}

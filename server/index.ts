@@ -9,6 +9,10 @@ import { SessionManager } from "./sessionManager.js";
 import { readState, writeState, rememberFolder } from "./stateStore.js";
 import { registerLauncherRoutes } from "./launcher.js";
 import { pruneOldImages, registerImageRoutes } from "./images.js";
+import { registerAutonomousRoutes } from "./autonomous/routes.js";
+import { attachAutonomousViewer } from "./autonomous/manager.js";
+import { getManager, loadPersisted } from "./autonomous/registry.js";
+import { autonomousStatus } from "./autonomous/discovery.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -148,6 +152,7 @@ app.get("/api/recent", async () => {
       path: f,
       name: path.basename(f) || f,
       isRepo: fs.existsSync(path.join(f, ".git")),
+      autonomous: autonomousStatus(f).status, // "completed" | "ready" | "drafting" | "none"
     }));
 });
 
@@ -284,6 +289,8 @@ app.delete("/api/sessions/:id", async (req, reply) => {
 
 registerLauncherRoutes(app);
 registerImageRoutes(app);
+registerAutonomousRoutes(app, sessions);
+loadPersisted(); // bring back autonomous tabs from a previous run (offered for relaunch)
 pruneOldImages();
 // Prune again daily so a long-running (autostarted) server doesn't hoard images.
 setInterval(pruneOldImages, 24 * 60 * 60 * 1000).unref();
@@ -315,6 +322,23 @@ app.put("/api/state", async (req) => {
 // Server → client: {type:"ready", shell} | {type:"output", data} | {type:"exit", code}
 // ---------------------------------------------------------------------------
 const wss = new WebSocketServer({ noServer: true });
+
+// ---------------------------------------------------------------------------
+// WebSocket: one connection per attached Autonomous tab.
+// Server → client: {type:"ready"} | {type:"replay", events, status}
+//                | {type:"event", event} | {type:"status", status}
+// ---------------------------------------------------------------------------
+const autonomousWss = new WebSocketServer({ noServer: true });
+
+autonomousWss.on("connection", (ws: WebSocket, tabId: string) => {
+  const manager = getManager(tabId);
+  if (!manager) {
+    ws.send(JSON.stringify({ type: "error", message: "No such autonomous tab (it may have ended)." }));
+    ws.close();
+    return;
+  }
+  attachAutonomousViewer(ws, manager);
+});
 
 wss.on("connection", (ws: WebSocket, sessionId: string) => {
   let session;
@@ -375,13 +399,11 @@ wss.on("connection", (ws: WebSocket, sessionId: string) => {
 async function main() {
   await app.listen({ host: HOST, port: PORT });
 
-  // Attach the WebSocket server to Fastify's HTTP server for /ws?session=<id>
+  // Attach the WebSocket servers to Fastify's HTTP server:
+  //   /ws?session=<id>            → a terminal pane
+  //   /ws/autonomous?tab=<id>     → an autonomous tab's event + status stream
   app.server.on("upgrade", (req, socket, head) => {
     const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
-    if (url.pathname !== "/ws") {
-      socket.destroy();
-      return;
-    }
     // Reject cross-origin / non-loopback WebSocket attempts before spawning
     // anything — see isAllowedWsRequest above.
     if (!isAllowedWsRequest(req)) {
@@ -389,10 +411,15 @@ async function main() {
       socket.destroy();
       return;
     }
-    const sessionId = url.searchParams.get("session") ?? "default";
-    wss.handleUpgrade(req, socket, head, (ws) => {
-      wss.emit("connection", ws, sessionId);
-    });
+    if (url.pathname === "/ws") {
+      const sessionId = url.searchParams.get("session") ?? "default";
+      wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, sessionId));
+    } else if (url.pathname === "/ws/autonomous") {
+      const tabId = url.searchParams.get("tab") ?? "";
+      autonomousWss.handleUpgrade(req, socket, head, (ws) => autonomousWss.emit("connection", ws, tabId));
+    } else {
+      socket.destroy();
+    }
   });
 
   console.log(`multiclaude server listening on http://${HOST}:${PORT}`);

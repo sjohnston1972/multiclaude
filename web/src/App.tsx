@@ -19,6 +19,8 @@ import {
   tabJson,
 } from "./layoutReconcile";
 import TerminalPane from "./TerminalPane";
+import AutonomousTab from "./AutonomousTab";
+import AutonomousNewDialog, { type LaunchedTab } from "./AutonomousNewDialog";
 import SessionListModal from "./SessionListModal";
 import NewSessionDialog from "./NewSessionDialog";
 import SettingsModal from "./SettingsModal";
@@ -38,6 +40,8 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [showSessions, setShowSessions] = useState(false);
   const [showNew, setShowNew] = useState(false);
+  const [showAutonomous, setShowAutonomous] = useState(false);
+  const [autonomousDir, setAutonomousDir] = useState(""); // last project used, to pre-fill pre-flight
   const [showSettings, setShowSettings] = useState(false);
   const [showHealth, setShowHealth] = useState(false);
   const [showBroadcast, setShowBroadcast] = useState(false);
@@ -187,6 +191,29 @@ export default function App() {
       }
     },
     [addSessionTab]
+  );
+
+  // Add an Autonomous tab (component:"autonomous") to the active tabset.
+  const addAutonomousTab = useCallback(
+    (t: LaunchedTab) => {
+      if (!model) return;
+      const json = {
+        type: "tab" as const,
+        name: `⚙ ${t.taskName}`,
+        component: "autonomous",
+        config: { tabId: t.id, taskName: t.taskName },
+      };
+      const added = layoutRef.current?.addTabToActiveTabSet(json);
+      if (!added) {
+        let tabsetId: string | undefined;
+        model.visitNodes((n) => {
+          if (!tabsetId && n.getType() === "tabset") tabsetId = n.getId();
+        });
+        if (tabsetId) model.doAction(Actions.addTab(json, tabsetId, DockLocation.CENTER, -1, true));
+      }
+      persistLayout(model);
+    },
+    [model, persistLayout]
   );
 
   const openBlankShell = useCallback(async () => {
@@ -555,6 +582,10 @@ export default function App() {
           />
         );
       }
+      if (node.getComponent() === "autonomous") {
+        const cfg = (node.getConfig() ?? {}) as { tabId: string; taskName?: string };
+        return <AutonomousTab tabId={cfg.tabId} taskName={cfg.taskName} node={node} />;
+      }
       return null;
     },
     [settings]
@@ -614,6 +645,12 @@ export default function App() {
         )}
         <ToolbarButton onClick={() => setShowNew(true)} title="Open a new terminal session">
           ＋ New session
+        </ToolbarButton>
+        <ToolbarButton
+          onClick={() => setShowAutonomous(true)}
+          title="Autonomous run — pre-flight & launch (re-opens pre-filled with your last project)"
+        >
+          ⚙ Autonomous
         </ToolbarButton>
         <ToolbarButton onClick={() => setShowSessions(true)} title="All live sessions">
           Sessions
@@ -702,6 +739,23 @@ export default function App() {
         <NewSessionDialog
           onCreated={addSessionTab}
           onClose={() => setShowNew(false)}
+          onAutonomous={() => {
+            setShowNew(false);
+            setShowAutonomous(true);
+          }}
+        />
+      )}
+
+      {showAutonomous && (
+        <AutonomousNewDialog
+          onLaunched={addAutonomousTab}
+          onDraftPlan={(s) => {
+            addSessionTab(s); // a normal terminal tab running primed claude
+            setAutonomousDir(s.cwd ?? ""); // remember it so the top-bar button reopens here
+            setShowAutonomous(false);
+          }}
+          initialProjectDir={autonomousDir}
+          onClose={() => setShowAutonomous(false)}
         />
       )}
 

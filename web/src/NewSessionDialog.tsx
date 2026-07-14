@@ -33,9 +33,12 @@ type Mode = "folder" | "github" | "blank";
 export default function NewSessionDialog({
   onCreated,
   onClose,
+  onAutonomous,
 }: {
   onCreated: (s: SessionInfo) => void;
   onClose: () => void;
+  /** Hand off to the dedicated Autonomous-run launcher (Step 17). */
+  onAutonomous?: () => void;
 }) {
   const [mode, setMode] = useState<Mode>("folder");
   const [browse, setBrowse] = useState<BrowseResult | null>(null);
@@ -183,6 +186,15 @@ export default function NewSessionDialog({
         {modeTab("folder", "Local folder")}
         {modeTab("github", "GitHub repo")}
         {modeTab("blank", "Blank shell")}
+        {onAutonomous && (
+          <button
+            onClick={onAutonomous}
+            title="Hand a task to a resumable, observable autonomous Claude run"
+            className="ml-auto rounded-t px-3 py-1.5 text-sm text-orange-300 hover:text-orange-200"
+          >
+            ⚙ Autonomous run…
+          </button>
+        )}
       </div>
 
       {error && <p className="mb-2 rounded bg-red-950 px-3 py-1.5 text-red-300">{error}</p>}

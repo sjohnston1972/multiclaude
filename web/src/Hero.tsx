@@ -5,7 +5,14 @@ interface RecentWorkspace {
   path: string;
   name: string;
   isRepo: boolean;
+  autonomous?: "completed" | "ready" | "drafting" | "none";
 }
+
+const AUTO_BADGE: Record<string, { label: string; cls: string }> = {
+  ready: { label: "⚙ autonomous", cls: "bg-blue-900/70 text-blue-300" },
+  completed: { label: "⚙ done", cls: "bg-emerald-900/70 text-emerald-300" },
+  drafting: { label: "⚙ drafting", cls: "bg-neutral-800 text-neutral-400" },
+};
 
 /**
  * The home screen shown when no sessions are open. Framed as a terminal
@@ -86,6 +93,14 @@ export default function Hero({
                       {w.isRepo && (
                         <span className="rounded bg-emerald-900/70 px-1.5 py-0.5 font-mono text-[10px] text-emerald-300">
                           git
+                        </span>
+                      )}
+                      {w.autonomous && w.autonomous !== "none" && AUTO_BADGE[w.autonomous] && (
+                        <span
+                          title="This repo has autonomous-run state files (PLAN.md / PROGRESS.md / DONE)"
+                          className={`rounded px-1.5 py-0.5 font-mono text-[10px] ${AUTO_BADGE[w.autonomous].cls}`}
+                        >
+                          {AUTO_BADGE[w.autonomous].label}
                         </span>
                       )}
                     </span>
