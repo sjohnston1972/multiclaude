@@ -24,7 +24,11 @@ step per turn, a commit per step, stop on DONE or on a Blockers entry. The serve
   sibling-repo blocker from the 2026-07-13 run.
 - **Launch/rollback** (R7/R5): rollback tag + gitignored state dir at launch; one-click
   `git reset --hard <tag> && git clean -fd` + state-dir removal on rollback.
-- **Onboarding + scaffold** (R11/R12).
+- **Onboarding + scaffold** (R11/R12), and the **discipline-block append** (R6.6): the launch
+  dialog offers, on a missing-block ⚠️, an "Append discipline block" button (writes the canonical
+  7-point block to `~/.claude/CLAUDE.md`, idempotent, heading-match) and a "Scaffold PLAN.md +
+  PROGRESS.md" button on a missing-PLAN ❌ — so a new session invocation can create all of
+  PLAN.md, PROGRESS.md, the discipline block, and (via the run) DONE.
 
 ## Requirement → verify command
 
@@ -45,6 +49,7 @@ Deterministic suite (no real `claude`, no tokens):
 | R9 persistence | `npx tsx scripts/autonomous-persist-test.ts` |
 | R9 relaunch | `npx tsx scripts/autonomous-relaunch-test.ts` |
 | R6.1-4,6,7 pre-flight | `npx tsx scripts/preflight-test.ts` |
+| R6.6 discipline append | `npx tsx scripts/discipline-test.ts` |
 | R7 launch sequence | `npx tsx scripts/launch-test.ts` |
 | R5 controls | `npx tsx scripts/controls-test.ts` |
 | R12 scaffold | `npx tsx scripts/scaffold-test.ts` |

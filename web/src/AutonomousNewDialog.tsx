@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Modal } from "./components";
 import FolderPickerModal from "./FolderPickerModal";
 import AutonomousOnboarding, { hasOnboarded } from "./AutonomousOnboarding";
@@ -56,44 +56,63 @@ export default function AutonomousNewDialog({
   const [accepted, setAccepted] = useState<Record<string, boolean>>({});
   const [browsing, setBrowsing] = useState(false);
   const [launching, setLaunching] = useState(false);
+  const [acting, setActing] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showHelp, setShowHelp] = useState(!hasOnboarded());
 
-  const addDirs = () =>
-    addDirsText
-      .split(/[\n,]+/)
-      .map((s) => s.trim())
-      .filter(Boolean);
-
-  // Re-run pre-flight whenever the project dir or additional dirs change.
-  useEffect(() => {
+  const refreshPreflight = useCallback(async () => {
     if (!projectDir.trim()) {
       setPf(null);
       return;
     }
-    let alive = true;
+    const addDirs = addDirsText.split(/[\n,]+/).map((s) => s.trim()).filter(Boolean);
     setChecking(true);
-    const t = setTimeout(async () => {
-      try {
-        const res = await fetch("/api/autonomous/preflight", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ projectDir: projectDir.trim(), addDirs: addDirs() }),
-        });
-        const body = await res.json();
-        if (alive) setPf(res.ok ? body : null);
-      } catch {
-        if (alive) setPf(null);
-      } finally {
-        if (alive) setChecking(false);
-      }
-    }, 300);
-    return () => {
-      alive = false;
-      clearTimeout(t);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    try {
+      const res = await fetch("/api/autonomous/preflight", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ projectDir: projectDir.trim(), addDirs }),
+      });
+      const body = await res.json();
+      setPf(res.ok ? body : null);
+    } catch {
+      setPf(null);
+    } finally {
+      setChecking(false);
+    }
   }, [projectDir, addDirsText]);
+
+  // Debounced re-run whenever the project dir or additional dirs change.
+  useEffect(() => {
+    const t = setTimeout(() => void refreshPreflight(), 300);
+    return () => clearTimeout(t);
+  }, [refreshPreflight]);
+
+  // Resolve a ⚠️/❌ by actually creating the missing artifact, then re-check.
+  const appendDiscipline = async () => {
+    setActing("discipline");
+    try {
+      await fetch("/api/autonomous/discipline", { method: "POST" });
+      await refreshPreflight();
+    } finally {
+      setActing(null);
+    }
+  };
+  const scaffoldPlan = async () => {
+    setActing("scaffold");
+    try {
+      await fetch("/api/autonomous/scaffold", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ projectDir: projectDir.trim() }),
+      });
+      await refreshPreflight();
+    } finally {
+      setActing(null);
+    }
+  };
+
+  const addDirs = () => addDirsText.split(/[\n,]+/).map((s) => s.trim()).filter(Boolean);
 
   const warnIds = (pf?.checks ?? []).filter((c) => c.level === "warn").map((c) => c.id);
   const allWarnsAccepted = warnIds.every((id) => accepted[id]);
@@ -199,12 +218,34 @@ export default function AutonomousNewDialog({
                   <span className="text-neutral-300">
                     <span className="text-neutral-100">{c.label}</span> — {c.detail}
                   </span>
-                  {c.level === "warn" && (
-                    <label className="ml-auto flex shrink-0 items-center gap-1 text-amber-300">
-                      <input type="checkbox" checked={!!accepted[c.id]} onChange={(e) => setAccepted((a) => ({ ...a, [c.id]: e.target.checked }))} />
-                      I accept this risk
-                    </label>
-                  )}
+                  <div className="ml-auto flex shrink-0 items-center gap-2">
+                    {c.id === "discipline" && pf.disciplineOfferAppend && (
+                      <button
+                        onClick={() => void appendDiscipline()}
+                        disabled={acting !== null}
+                        title="Append the discipline block to your global ~/.claude/CLAUDE.md (idempotent)"
+                        className="rounded bg-amber-700 px-2 py-0.5 text-white hover:bg-amber-600 disabled:opacity-50"
+                      >
+                        {acting === "discipline" ? "Appending…" : "Append discipline block"}
+                      </button>
+                    )}
+                    {c.id === "plan" && c.level === "fail" && (
+                      <button
+                        onClick={() => void scaffoldPlan()}
+                        disabled={acting !== null}
+                        title="Create a PLAN.md + PROGRESS.md from the template — you then fill in the plan"
+                        className="rounded bg-neutral-700 px-2 py-0.5 text-neutral-100 hover:bg-neutral-600 disabled:opacity-50"
+                      >
+                        {acting === "scaffold" ? "Scaffolding…" : "Scaffold PLAN.md + PROGRESS.md"}
+                      </button>
+                    )}
+                    {c.level === "warn" && (
+                      <label className="flex items-center gap-1 text-amber-300">
+                        <input type="checkbox" checked={!!accepted[c.id]} onChange={(e) => setAccepted((a) => ({ ...a, [c.id]: e.target.checked }))} />
+                        I accept this risk
+                      </label>
+                    )}
+                  </div>
                 </div>
               ))}
               {pf.pathScan.length > 0 && (

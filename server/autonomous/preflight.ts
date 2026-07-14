@@ -1,9 +1,9 @@
 import { execFile } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { scanPlanForPaths, type PathScanRow } from "./pathScan.js";
+import { claudeMdPath, DISCIPLINE_HEADING } from "./discipline.js";
 
 const execFileA = promisify(execFile);
 
@@ -32,13 +32,6 @@ export interface PreflightResult {
   /** No ❌ remaining — Launch may be enabled (⚠️ still require explicit accept in the UI). */
   canLaunch: boolean;
 }
-
-/** The user-global CLAUDE.md, env-overridable so tests don't depend on the real machine. */
-export function claudeMdPath(): string {
-  return process.env.MULTICLAUDE_CLAUDE_MD ?? path.join(os.homedir(), ".claude", "CLAUDE.md");
-}
-
-const DISCIPLINE_HEADING = /^##\s+Autonomous run discipline/m;
 
 export async function runPreflight(projectDir: string, addDirs: string[] = []): Promise<PreflightResult> {
   const checks: PreflightCheck[] = [];
