@@ -73,24 +73,43 @@ export default function AutonomousTab({
   const logRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const proto = location.protocol === "https:" ? "wss" : "ws";
-    const ws = new WebSocket(`${proto}://${location.host}/ws/autonomous?tab=${encodeURIComponent(tabId)}`);
-    ws.onopen = () => setConn("open");
-    ws.onclose = () => setConn("closed");
-    ws.onmessage = (e) => {
-      const msg = JSON.parse(e.data as string);
-      if (msg.type === "replay") {
-        setEvents(msg.events ?? []);
-        setStatus(msg.status ?? null);
-        statusRef.current = msg.status ? { s: msg.status, at: Date.now() } : null;
-      } else if (msg.type === "event") {
-        setEvents((prev) => [...prev, msg.event]);
-      } else if (msg.type === "status") {
-        setStatus(msg.status);
-        statusRef.current = { s: msg.status, at: Date.now() };
-      }
+    let closed = false;
+    let ws: WebSocket | null = null;
+    let retry: ReturnType<typeof setTimeout> | null = null;
+
+    // Reconnect on drop (server restart, relaunch of a dead run) — replay resets
+    // the event list, so reconnecting never duplicates. Like TerminalPane.
+    const connect = () => {
+      const proto = location.protocol === "https:" ? "wss" : "ws";
+      ws = new WebSocket(`${proto}://${location.host}/ws/autonomous?tab=${encodeURIComponent(tabId)}`);
+      setConn("connecting");
+      ws.onopen = () => setConn("open");
+      ws.onmessage = (e) => {
+        const msg = JSON.parse(e.data as string);
+        if (msg.type === "replay") {
+          setEvents(msg.events ?? []);
+          setStatus(msg.status ?? null);
+          statusRef.current = msg.status ? { s: msg.status, at: Date.now() } : null;
+        } else if (msg.type === "event") {
+          setEvents((prev) => [...prev, msg.event]);
+        } else if (msg.type === "status") {
+          setStatus(msg.status);
+          statusRef.current = { s: msg.status, at: Date.now() };
+        }
+      };
+      ws.onclose = () => {
+        setConn("closed");
+        if (!closed) retry = setTimeout(connect, 2000);
+      };
+      ws.onerror = () => ws?.close();
     };
-    return () => ws.close();
+    connect();
+
+    return () => {
+      closed = true;
+      if (retry) clearTimeout(retry);
+      ws?.close();
+    };
   }, [tabId]);
 
   // 1s tick for the live elapsed clocks.
