@@ -88,6 +88,7 @@ export default function AutonomousNewDialog({
   const [checking, setChecking] = useState(false);
   const [accepted, setAccepted] = useState<Record<string, boolean>>({});
   const [browsing, setBrowsing] = useState(false);
+  const [browsingAddDir, setBrowsingAddDir] = useState(false);
   const [launching, setLaunching] = useState(false);
   const [acting, setActing] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -273,10 +274,21 @@ export default function AutonomousNewDialog({
           </label>
         </div>
 
-        <label className="block" title={HINTS.addDirs}>
-          <span className="text-neutral-300">Additional directories (one per line — each becomes --add-dir)<Info text={HINTS.addDirs} /></span>
-          <textarea value={addDirsText} onChange={(e) => setAddDirsText(e.target.value)} rows={2} className="mt-1 w-full rounded border border-neutral-700 bg-neutral-950 px-2 py-1 font-mono text-xs text-neutral-100" />
-        </label>
+        <div title={HINTS.addDirs}>
+          <div className="flex items-center justify-between">
+            <span className="text-neutral-300">Additional directories (one per line — each becomes --add-dir)<Info text={HINTS.addDirs} /></span>
+            <button onClick={() => setBrowsingAddDir(true)} className="text-xs text-neutral-400 hover:text-neutral-200">
+              ＋ Browse & add
+            </button>
+          </div>
+          <textarea
+            value={addDirsText}
+            onChange={(e) => setAddDirsText(e.target.value)}
+            rows={2}
+            placeholder="e.g. C:\cloudflare_projects\skills-foundry — or click “Browse & add”"
+            className="mt-1 w-full rounded border border-neutral-700 bg-neutral-950 px-2 py-1 font-mono text-xs text-neutral-100"
+          />
+        </div>
 
         <label className="block" title={HINTS.extraAllow}>
           <span className="text-neutral-300">Extra Bash allow-rules (optional — widens the default git/npm/npx/node scope)<Info text={HINTS.extraAllow} /></span>
@@ -409,6 +421,21 @@ export default function AutonomousNewDialog({
             setProjectDir(folder);
             if (!taskName) setTaskName(folder.split(/[\\/]/).filter(Boolean).pop()?.toLowerCase().replace(/[^a-z0-9-]+/g, "-") ?? "");
             setBrowsing(false);
+          }}
+        />
+      )}
+
+      {browsingAddDir && (
+        <FolderPickerModal
+          title="Add a directory the run may access (--add-dir)"
+          onClose={() => setBrowsingAddDir(false)}
+          onPick={(folder) => {
+            setAddDirsText((prev) => {
+              const lines = prev.split(/\n/).map((s) => s.trim()).filter(Boolean);
+              if (!lines.includes(folder)) lines.push(folder);
+              return lines.join("\n");
+            });
+            setBrowsingAddDir(false);
           }}
         />
       )}
