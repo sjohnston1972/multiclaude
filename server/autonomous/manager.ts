@@ -249,12 +249,33 @@ export class AutonomousManager {
         continue;
       }
 
-      // Failure ladder: retry the same model, then downgrade, then sleep/stop.
+      // A usage limit is ACCOUNT-WIDE — it blocks every model, not just this one.
+      // So neither retrying (the reset is minutes or hours away) nor downgrading
+      // (opus and sonnet hit the identical wall) can possibly help: sleep until it
+      // resets and resume on the model the operator actually chose.
+      //
+      // Observed 2026-07-15: a "hit your session limit · resets 5:50pm" at 16:28
+      // local burned fable → opus → sonnet in 12 attempts over 5 minutes, then
+      // slept anyway — and left the run permanently on sonnet long after the
+      // limit had cleared. The downgrade was pure loss. Check this first.
+      if (isUsageLimit(this.turnText)) {
+        this.wakeAt = parseResetTime(this.turnText, Date.now()) + Math.floor(Math.random() * RESET_JITTER_MS);
+        this.pushEvent("usage-limit", {
+          model: this.activeModel,
+          wakeAt: this.wakeAt,
+          detail: tail(this.turnText),
+        });
+        this.setState("sleeping");
+        this.scheduleResume();
+        return;
+      }
+
+      // Everything else: retry the same model, then downgrade, then stop.
       // Retrying first is what saves a run from a transient API error — the
       // failure we've actually observed killing one. Only a failure that
-      // survives every retry is treated as the model being unavailable, so a
+      // survives every retry is treated as this model being unavailable, so a
       // network blip can no longer masquerade as exhausted credits.
-      const reason = isUsageLimit(this.turnText) ? "usage limit" : `exit ${code}`;
+      const reason = `exit ${code}`;
       const backoff = this.config.retryBackoffMs ?? RETRY_BACKOFF_MS;
       if (this.retries < backoff.length) {
         const waitMs = backoff[this.retries];
@@ -286,12 +307,6 @@ export class AutonomousManager {
         continue;
       }
 
-      if (isUsageLimit(this.turnText)) {
-        this.wakeAt = parseResetTime(this.turnText, Date.now()) + Math.floor(Math.random() * RESET_JITTER_MS);
-        this.setState("sleeping");
-        this.scheduleResume();
-        return;
-      }
       // Salvage before reporting: a dying run must not leave a dirty tree that
       // blocks the next launch's clean-tree pre-flight.
       await this.commitPartialWork(reason);

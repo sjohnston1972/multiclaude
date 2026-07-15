@@ -61,7 +61,19 @@ function dto(id: string): AutonomousRecord | undefined {
   const m = managers.get(id);
   if (!m) return { ...r, relaunchable: true };
   const s = m.getStatus();
-  return { ...r, state: s.state, currentStep: s.currentStep, costUsd: s.costUsd, lastError: s.lastError, relaunchable: false };
+  // activeModel/fellBackFrom come from the live supervisor: `model` on the record is
+  // only the launch choice, so without these the list can't show that a run has
+  // fallen back and is doing its work on a lesser model.
+  return {
+    ...r,
+    state: s.state,
+    currentStep: s.currentStep,
+    costUsd: s.costUsd,
+    lastError: s.lastError,
+    activeModel: s.activeModel,
+    fellBackFrom: s.fellBackFrom,
+    relaunchable: false,
+  };
 }
 
 export function createTab(input: CreateTabInput): AutonomousRecord {

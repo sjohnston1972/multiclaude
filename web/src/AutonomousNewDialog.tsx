@@ -79,6 +79,8 @@ interface PastRun {
   currentStep: string | null;
   costUsd: number;
   startedAt: number;
+  activeModel?: string;
+  fellBackFrom?: string | null;
 }
 
 const RUN_STATE_STYLE: Record<string, string> = {
@@ -310,7 +312,13 @@ export default function AutonomousNewDialog({
                   </span>
                   <span className="font-mono text-neutral-200">⚙ {r.taskName}</span>
                   <span className="text-neutral-500">
-                    {r.model}
+                    {r.fellBackFrom && r.activeModel ? (
+                      <span className="text-amber-300" title={`Launched on ${r.fellBackFrom}; fell back and is running on ${r.activeModel}.`}>
+                        {r.fellBackFrom} → {r.activeModel}
+                      </span>
+                    ) : (
+                      r.activeModel ?? r.model
+                    )}
                     {r.currentStep ? ` · ${r.currentStep}` : ""}
                     {r.costUsd > 0 ? ` · $${r.costUsd.toFixed(2)}` : ""}
                   </span>

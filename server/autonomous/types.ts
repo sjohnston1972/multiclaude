@@ -86,6 +86,10 @@ export interface AutonomousRecord {
   sessionId: string;
   /** Rollback tag created at launch (R7); null until launched (Step 15). */
   launchTag: string | null;
+  /** Model the live supervisor is spawning now — absent when no supervisor is live. */
+  activeModel?: string;
+  /** Set when the run has fallen back: the model it was launched with. */
+  fellBackFrom?: string | null;
   state: AutonomousState;
   currentStep: string | null;
   startedAt: number;

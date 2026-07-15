@@ -141,21 +141,43 @@ check("hasBlockers true on a real 'no'-starting blocker", hasBlockers("## Blocke
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
-// --- (e) fable exhausts the chain rather than idling or dying silently -------
+// --- (e) a usage limit NEVER downgrades — it's account-wide ------------------
+// Regression test for the real 2026-07-15 fault: a "hit your session limit ·
+// resets 5:50pm" burned fable → opus → sonnet in 12 attempts over 5 minutes,
+// then slept anyway and left the run on sonnet long after the limit cleared.
+// A limit blocks every model, so downgrading cannot help. Sleep on the model
+// the operator chose.
 {
   const dir = seedRepo();
-  const mgr = await run(dir, "limit", "fable"); // stub reports a limit on every turn
+  const mgr = await run(dir, "limit", "fable");
   const hops = mgr.getEvents().filter((e) => e.kind === "model-fallback");
   const retries = mgr.getEvents().filter((e) => e.kind === "turn-retry");
-  check("(e) each model got its full retry allowance first", retries.length === 9, `retries=${retries.length}`);
-  check("(e) fable → opus → sonnet: two fallbacks", hops.length === 2, `hops=${hops.length}`);
-  check("(e) first hop is fable → opus", (hops[0]?.payload as any)?.to === "opus", JSON.stringify(hops[0]?.payload));
-  check("(e) second hop is opus → sonnet", (hops[1]?.payload as any)?.to === "sonnet", JSON.stringify(hops[1]?.payload));
-  check("(e) fallback records why it happened", (hops[0]?.payload as any)?.reason === "usage limit", JSON.stringify(hops[0]?.payload));
-  check("(e) activeModel ended at the bottom of the chain", mgr.activeModel === "sonnet", mgr.activeModel);
-  check("(e) fellBackFrom remembers the requested model", mgr.fellBackFrom === "fable", String(mgr.fellBackFrom));
-  // Only once sonnet — the last link — is limited does the old sleep behaviour apply.
-  check("(e) sleeps only after the chain is exhausted", mgr.getState() === "sleeping", mgr.getState());
+  const limits = mgr.getEvents().filter((e) => e.kind === "usage-limit");
+  check("(e) usage limit → no downgrade at all", hops.length === 0, `hops=${hops.length}`);
+  check("(e) usage limit → no pointless retries either", retries.length === 0, `retries=${retries.length}`);
+  check("(e) stays on the model the operator chose", mgr.activeModel === "fable", mgr.activeModel);
+  check("(e) nothing to report as a fallback", mgr.fellBackFrom === null, String(mgr.fellBackFrom));
+  check("(e) sleeps until the limit resets", mgr.getState() === "sleeping", mgr.getState());
+  check("(e) wakeAt is in the future", (mgr.wakeAt ?? 0) > Date.now(), String(mgr.wakeAt));
+  check("(e) emits a usage-limit event with the message", limits.length === 1 && String((limits[0]?.payload as any)?.detail).includes("limit"), JSON.stringify(limits[0]?.payload));
+  mgr.stop();
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
+// --- (e1) a non-limit failure IS what walks the chain ------------------------
+{
+  const dir = seedRepo();
+  const mgr = await run(dir, "hard-fail", "fable"); // never clears, and isn't a limit
+  const hops = mgr.getEvents().filter((e) => e.kind === "model-fallback");
+  const retries = mgr.getEvents().filter((e) => e.kind === "turn-retry");
+  check("(e1) each model got its full retry allowance first", retries.length === 9, `retries=${retries.length}`);
+  check("(e1) fable → opus → sonnet: two fallbacks", hops.length === 2, `hops=${hops.length}`);
+  check("(e1) first hop is fable → opus", (hops[0]?.payload as any)?.to === "opus", JSON.stringify(hops[0]?.payload));
+  check("(e1) second hop is opus → sonnet", (hops[1]?.payload as any)?.to === "sonnet", JSON.stringify(hops[1]?.payload));
+  check("(e1) activeModel ended at the bottom of the chain", mgr.activeModel === "sonnet", mgr.activeModel);
+  check("(e1) fellBackFrom remembers the requested model", mgr.fellBackFrom === "fable", String(mgr.fellBackFrom));
+  check("(e1) chain exhausted on a non-limit failure → error, not sleep", mgr.getState() === "error", mgr.getState());
+  check("(e1) error carries the real output", (mgr.lastError ?? "").includes("Connection closed"), String(mgr.lastError));
   mgr.stop();
   fs.rmSync(dir, { recursive: true, force: true });
 }

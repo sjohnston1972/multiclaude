@@ -36,6 +36,13 @@ if (scenario === "limit") {
   process.exit(1);
 }
 
+if (scenario === "hard-fail") {
+  // A non-limit failure that never clears — the only thing that should ever
+  // cause a model downgrade. Leaves the tree clean.
+  emit({ type: "assistant", message: { content: [{ type: "text", text: "API Error: Connection closed mid-response." }] } });
+  process.exit(1);
+}
+
 if (scenario === "dirty-fail") {
   // Half-writes a file then dies, like a run killed mid-step. The manager should
   // salvage the leftovers into a WIP commit so the tree ends clean.
