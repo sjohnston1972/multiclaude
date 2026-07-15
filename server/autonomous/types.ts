@@ -51,6 +51,12 @@ export interface AutonomousConfig {
   startResumed?: boolean;
   /** Model alias, default `sonnet`. */
   model?: string;
+  /**
+   * Backoff before each same-model retry of a failed turn. Length = number of
+   * retries before the run gives up on this model and downgrades. Tests set it
+   * tiny; production uses RETRY_BACKOFF_MS.
+   */
+  retryBackoffMs?: number[];
   /** Extra directories granted via `--add-dir` (fixes B4). */
   addDirs?: string[];
   /** Optional per-invocation hard cost cap → `--max-budget-usd`. */

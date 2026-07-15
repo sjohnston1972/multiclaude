@@ -33,6 +33,7 @@ async function run(cwd: string, scenario: string, model?: string): Promise<Auton
     cwd,
     model,
     turnDelayMs: 5,
+    retryBackoffMs: [1, 1, 1], // real backoff is 5s/20s/60s — too slow for a test
     spawn: { command: process.execPath, args: [stub] },
   });
   await mgr.start();
@@ -97,11 +98,27 @@ check("hasBlockers true on a real 'no'-starting blocker", hasBlockers("## Blocke
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
+// --- (e0) a transient API error is retried, not fatal ------------------------
+// Reproduces the real 2026-07-15 failure: "Connection closed mid-response" killed
+// a healthy run outright. The same turn retried on the same model must rescue it.
+{
+  const dir = seedRepo();
+  const mgr = await run(dir, "flaky", "fable");
+  const retries = mgr.getEvents().filter((e) => e.kind === "turn-retry");
+  check("(e0) transient error → run survives to done", mgr.getState() === "done", mgr.getState());
+  check("(e0) exactly one retry was needed", retries.length === 1, `retries=${retries.length}`);
+  check("(e0) retried on the same model — no downgrade", mgr.activeModel === "fable" && mgr.fellBackFrom === null, mgr.activeModel);
+  check("(e0) retry event records the real message", String((retries[0]?.payload as any)?.detail).includes("Connection closed"), JSON.stringify(retries[0]?.payload));
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
 // --- (e) fable exhausts the chain rather than idling or dying silently -------
 {
   const dir = seedRepo();
   const mgr = await run(dir, "limit", "fable"); // stub reports a limit on every turn
   const hops = mgr.getEvents().filter((e) => e.kind === "model-fallback");
+  const retries = mgr.getEvents().filter((e) => e.kind === "turn-retry");
+  check("(e) each model got its full retry allowance first", retries.length === 9, `retries=${retries.length}`);
   check("(e) fable → opus → sonnet: two fallbacks", hops.length === 2, `hops=${hops.length}`);
   check("(e) first hop is fable → opus", (hops[0]?.payload as any)?.to === "opus", JSON.stringify(hops[0]?.payload));
   check("(e) second hop is opus → sonnet", (hops[1]?.payload as any)?.to === "sonnet", JSON.stringify(hops[1]?.payload));

@@ -24,6 +24,13 @@ import { extractStep, parseGitLogLine, type StatusStrip } from "./status.js";
 const EVENT_BUFFER_LIMIT = 2000; // most-recent N events kept for replay on reattach
 const DEFAULT_TURN_DELAY_MS = 10_000; // pause between successful turns (spec R8)
 const RESET_JITTER_MS = 60_000; // spread wake-ups so we don't retry on the exact second
+/**
+ * Backoff before each same-model retry of a failed turn. A dropped connection
+ * mid-response ("API Error: Connection closed mid-response") used to kill a run
+ * outright — it's transient, so the first thing to try is simply the same turn
+ * again. Only once these are spent does the run downgrade the model.
+ */
+export const RETRY_BACKOFF_MS = [5_000, 20_000, 60_000];
 
 /** The baked-in autonomous run prompt (spec R10) — sent verbatim on every invocation. */
 export const AUTONOMOUS_PROMPT = `Read PLAN.md and PROGRESS.md as your first action. Identify the next incomplete
@@ -114,6 +121,8 @@ export class AutonomousManager {
   activeModel: string;
   /** Set once the run has downgraded, so the UI can say so instead of quietly using a lesser model. */
   fellBackFrom: string | null = null;
+  /** Same-model retries spent on the current model. Reset by a clean turn or a downgrade. */
+  private retries = 0;
 
   private state: AutonomousState = "preflight";
   private events: AutonomousEvent[] = [];
@@ -235,19 +244,36 @@ export class AutonomousManager {
       if (this.stopped) return;
 
       if (code === 0) {
+        this.retries = 0;
         await this.delay(this.config.turnDelayMs ?? DEFAULT_TURN_DELAY_MS);
         continue;
       }
-      // A failing turn downgrades while a cheaper model is left, rather than
-      // sleeping or stopping. Deliberately triggered by ANY non-zero exit, not
-      // just a matched limit message: we can't rely on recognising the exact
-      // wording of every credit/quota refusal, and an unmatched one must not
-      // silently end the run. Cost of the wider net is bounded — a genuine crash
-      // burns at most one extra attempt per remaining model, then surfaces below
-      // with its output intact.
+
+      // Failure ladder: retry the same model, then downgrade, then sleep/stop.
+      // Retrying first is what saves a run from a transient API error — the
+      // failure we've actually observed killing one. Only a failure that
+      // survives every retry is treated as the model being unavailable, so a
+      // network blip can no longer masquerade as exhausted credits.
+      const reason = isUsageLimit(this.turnText) ? "usage limit" : `exit ${code}`;
+      const backoff = this.config.retryBackoffMs ?? RETRY_BACKOFF_MS;
+      if (this.retries < backoff.length) {
+        const waitMs = backoff[this.retries];
+        this.retries++;
+        this.pushEvent("turn-retry", {
+          model: this.activeModel,
+          attempt: this.retries,
+          of: backoff.length,
+          waitMs,
+          reason,
+          detail: tail(this.turnText),
+        });
+        await this.delay(waitMs);
+        if (this.stopped) return;
+        continue;
+      }
+
       const downgrade = nextModel(this.activeModel);
       if (downgrade) {
-        const reason = isUsageLimit(this.turnText) ? "usage limit" : `exit ${code}`;
         this.pushEvent("model-fallback", {
           from: this.activeModel,
           to: downgrade,
@@ -256,6 +282,7 @@ export class AutonomousManager {
         });
         this.fellBackFrom ??= this.activeModel;
         this.activeModel = downgrade;
+        this.retries = 0; // the new model gets its own retry allowance
         continue;
       }
 
@@ -266,7 +293,7 @@ export class AutonomousManager {
         return;
       }
       // Never fail blank: the output tail is the only clue to an unrecognised stop.
-      this.lastError = `claude (${this.activeModel}) exited with code ${code}: ${tail(this.turnText)}`;
+      this.lastError = `claude (${this.activeModel}) exited with code ${code} after ${backoff.length} retries and no model left to fall back to: ${tail(this.turnText)}`;
       this.setState("error");
       break;
     }
