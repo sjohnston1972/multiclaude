@@ -11,6 +11,8 @@ usually running `claude`. The other is an **[Autonomous run](#autonomous-runs)**
 you hand Claude a written work order and it executes it unattended, one step per
 turn, committing as it goes, while you watch it happen (or sleep through it).
 
+![multiclaude in a 2×2 layout: an autonomous run mid-step at top left — running Step 6, with a banner showing it fell back from fable to sonnet — alongside three interactive Claude sessions](screenshots/multiclaude.png)
+
 **Security note — read this first.** This app gives whoever connects a real
 shell on your machine. That is the entire point of it, and it is why the
 defaults are what they are:
