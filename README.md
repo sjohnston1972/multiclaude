@@ -6,11 +6,31 @@ server holds the terminals; the browser is just a viewer. Close or refresh the
 browser and your sessions keep running — reconnecting reattaches and replays
 recent output, like plugging back into a console port.
 
-**Security note:** this app gives whoever connects a real shell on your
-machine. It listens on `127.0.0.1` only and refuses to start on any other
-address. It also rejects any REST or WebSocket request whose browser origin
-isn't loopback, so a random website you visit can't reach in and spawn a
-shell through your browser. Never expose it through a tunnel or reverse proxy.
+Panes come in two kinds. Most are **terminals** — a real shell you type in,
+usually running `claude`. The other is an **[Autonomous run](#autonomous-runs)**:
+you hand Claude a written work order and it executes it unattended, one step per
+turn, committing as it goes, while you watch it happen (or sleep through it).
+
+**Security note — read this first.** This app gives whoever connects a real
+shell on your machine. That is the entire point of it, and it is why the
+defaults are what they are:
+
+- It listens on `127.0.0.1` only, and **refuses to start** on a non-loopback
+  address unless you explicitly set `MULTICLAUDE_UNSAFE_HOST=1` (which prints a
+  loud warning). LAN mode below is that opt-in, deliberately.
+- It rejects any REST or WebSocket request whose browser origin isn't the
+  address it's answering on, so a random website you visit can't reach in and
+  spawn a shell through your browser, and DNS-rebinding attacks are refused.
+- There is no telemetry and no outbound call of its own — only what your own
+  shells make.
+
+**Never put it behind a tunnel or reverse proxy.** There is no authentication,
+because on loopback there's nothing to authenticate. Exposing it to the
+internet hands your machine to anyone who finds the port.
+
+This is a personal tool built for one Windows machine, not a product. It's
+public so people can read it, learn from it, or fork it — not because it's
+hardened for anything beyond the box it runs on.
 
 ## Reaching it from another PC on your LAN
 
@@ -165,6 +185,107 @@ Keyboard shortcuts: `Ctrl+K` command palette, `Ctrl+Shift+F` search,
 panes. (Some browsers reserve `Ctrl+Tab`/`Ctrl+Shift+T` for themselves and
 won't pass them to the page.)
 
+## Autonomous runs
+
+A terminal pane is you driving. An **Autonomous** pane is a work order: Claude
+executes a written plan unattended, one step per turn, committing and pushing
+each step, and stops when it's done or genuinely stuck. You watch it happen in
+the tab — or read the log in the morning.
+
+### The contract
+
+Three files in the target repo are the entire protocol. They're plain markdown,
+they live in the repo, and they survive anything:
+
+| File | What it is |
+|---|---|
+| `PLAN.md` | The work order — 5–15 ordered steps, each with a done condition that can be *checked by running a command*. No step may need a decision from you. |
+| `PROGRESS.md` | The run's log — one timestamped entry per verified step, appended, never rewritten. A populated `## Blockers` section is how the run tells you it's stuck. |
+| `DONE` | The finish line. When it appears, the run stops. Its absence is what authorises a run to start. |
+
+Nothing else is remembered between turns. Every turn re-reads these files from
+disk, so a run survives a crash, a server restart, or a reboot with no loss of
+context — the state is the repo, not the process.
+
+### Launching one
+
+**⚙ Autonomous** in the toolbar. The dialog runs a **pre-flight** first and
+won't let you launch until it's green:
+
+- the project directory is a git repo, and its **working tree is clean**
+  (a clean tree is what makes Rollback safe — see below)
+- `PLAN.md` and `PROGRESS.md` exist at the repo root
+- every path mentioned in `PLAN.md` stays inside the sandbox the run is granted
+- the **run discipline** block is installed in your global `CLAUDE.md`
+- the `claude` CLI is present, with its version
+
+Failed checks say how to fix them, and most fix in one click: scaffold
+`PLAN.md`/`PROGRESS.md` from templates, or append the discipline block. If you
+don't have a plan yet, **Draft a plan with Claude** opens a primed interactive
+session to co-author `PLAN.md` with you, then come back and launch.
+
+Options: **model** (`sonnet` default, `opus`, or `fable` — most capable and
+priciest), a **budget cap** in USD (a hard per-invocation ceiling), **additional
+directories** the run may touch (with quick-pick chips for sibling folders,
+remembered per project), and **extra Bash allow-rules** to widen the default
+`git` / `npm` / `npx` / `node` scope.
+
+### Everything a run does is reversible
+
+Launching first writes a **rollback tag** (`multiclaude-launch-<task>-<unix>`),
+adds `/.multiclaude/` to `.gitignore`, and pins a session UUID under
+`.multiclaude/<task>/`. **Rollback** in the tab undoes the entire run —
+`git reset --hard <tag>` plus `git clean -fd` — back to the moment before it
+started. That's also why pre-flight insists on a clean tree: rollback would
+otherwise destroy work that had nothing to do with the run.
+
+### Watching it
+
+The tab shows a live event log (what Claude read, wrote, ran, and committed),
+with `PROGRESS.md` and `PLAN.md` rendered beside it, refreshed as they change.
+The header carries the state badge, the current step, a turn clock, the running
+cost, and the **cache-hit %** (the share of input tokens served from the prompt
+cache — higher means cheaper resumes). Controls: **Pause**, **Resume**,
+**Kill**, **Rollback**.
+
+### When things go wrong
+
+The supervisor's whole job is that a run doesn't quietly die at 2am. In order:
+
+1. **A failed turn is retried** on the same model — 5s, then 20s, then 60s. Most
+   failures are transient (a dropped connection mid-response), and a retry
+   clears them.
+2. **Still failing → the model steps down**: `fable` → `opus` → `sonnet`, with an
+   amber banner naming what it fell back from and why. It never switches back up
+   on its own. A pinned model id (e.g. `claude-fable-5`) is never substituted.
+3. **Out of models, and it's a usage limit** → it sleeps until the limit resets
+   (parsed from the message) and resumes on its own.
+4. **Dead anyway** → whatever was half-written is committed as one marked
+   `wip: partial Step N — run aborted (<reason>)` commit, so the work is visible
+   in `git log` and the tree is clean for the next run. The error banner carries
+   the tail of the real output, so a failure is never blank.
+5. **Claude writes a Blocker** → the run stops and the tab says so. This is the
+   good outcome when a plan is wrong: it stops and asks instead of guessing its
+   way into a mess overnight.
+
+### Runs outlive everything
+
+A run belongs to the server, not the tab — and its record outlives even the
+server. Close the tab, refresh, restart the machine: **Past runs** at the top of
+the Autonomous dialog lists every run with its state, model, step and cost, and
+reopens its tab on click. Reopening only shows the tab; nothing restarts until
+you press **Resume**, which continues the same conversation from its pinned
+session UUID rather than starting over.
+
+### Work is pushed, not just committed
+
+Each verified step is committed *and pushed*, so a night's work never exists
+only on one disk. A push that fails (no remote, no upstream, missing scope) is
+deliberately **not** treated as a blocker — the run notes it in `PROGRESS.md`
+and carries on, since the commits are still safe locally. The one thing never
+pushed is the `wip:` salvage commit above: that code is unverified by
+definition.
+
 ## Where things live
 
 | What | Where |
@@ -172,6 +293,9 @@ won't pass them to the page.)
 | Layout, settings, recent folders | `%LOCALAPPDATA%\multiclaude\state.json` |
 | Pasted images | `%LOCALAPPDATA%\multiclaude\images\` (pruned after 7 days) |
 | Cloned GitHub repos | `%USERPROFILE%\multiclaude-workspaces\` (override with `MULTICLAUDE_WORKSPACES`) |
+| Autonomous run state (pinned session UUID) | `.multiclaude/<task>/` in the target repo (gitignored automatically) |
+| Autonomous run registry (survives restarts) | `%LOCALAPPDATA%\multiclaude\state.json` |
+| Rollback points | git tags — `multiclaude-launch-<task>-<unix>` |
 
 ## How it works (one paragraph)
 
@@ -181,6 +305,13 @@ terminal pane: keystrokes go down, screen output comes up, and resize events
 tell the shell its real window size. The server keeps ~500 KB of recent output
 per session in memory, so a reconnecting browser can replay what it missed.
 Sessions belong to the server, not the browser — the browser is a viewer.
+
+An autonomous run is the same shape one level up: instead of a pty, the server
+supervises repeated `claude -p` invocations pinned to one session UUID
+(`--resume` after the first), parses their stream-json output into the event log
+you see, and decides what to do when one fails. It never parses Claude's
+*reasoning* — only the mechanics: which step, what it cost, and whether the turn
+succeeded. The plan and the log are files in your repo, not state in this app.
 
 ## Troubleshooting
 
@@ -219,4 +350,22 @@ node scripts/create-test.mjs     # create-folder + create-repo validation
 npx tsx scripts/reconcile-test.ts # layout↔live-session reconciliation on load
 node scripts/git-features-test.mjs # git-init, isRepo detection, publish validation
 node scripts/restore-test.mjs    # workspace-restore API (full flow needs a restart)
+```
+
+Autonomous runs are covered separately. These are deterministic — they drive the
+supervisor against a fake `claude` stub, so they cost nothing and touch no
+network:
+
+```
+npx tsx scripts/loop-test.ts        # the supervisor: retry ladder, model fallback,
+                                    # usage-limit sleep, wip-salvage, DONE, blockers
+npx tsx scripts/preflight-test.ts   # pre-flight checks
+npx tsx scripts/launch-test.ts      # rollback tag, state dir, gitignore
+npx tsx scripts/controls-test.ts    # pause / resume / kill / rollback
+npx tsx scripts/discipline-test.ts  # the CLAUDE.md discipline block append
+npx tsx scripts/scaffold-test.ts    # PLAN.md / PROGRESS.md templates
+npx tsx scripts/pathscan-test.ts    # PLAN.md sandbox path scan
+npx tsx scripts/autonomous-relaunch-test.ts  # pinned UUID + --resume args
+npx tsx scripts/autonomous-persist-test.ts   # run registry survives a restart
+npx tsx scripts/streamparse-test.ts # stream-json framing
 ```
