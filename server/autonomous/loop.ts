@@ -11,6 +11,32 @@ export function isUsageLimit(text: string): boolean {
   return LIMIT_RE.test(text);
 }
 
+/**
+ * Model downgrade chain, most capable first. When a turn fails and a cheaper
+ * model is still available, the run switches down instead of stopping or
+ * sleeping — an overnight run that dies is worse than one that finishes on a
+ * lesser model.
+ *
+ * Only these three bare aliases participate. A pinned model id (`claude-fable-5`)
+ * or anything unrecognised yields no next model, so the run keeps the operator's
+ * exact choice and falls back to the old sleep/error behaviour rather than
+ * silently substituting a model they didn't ask for.
+ */
+export const MODEL_CHAIN = ["fable", "opus", "sonnet"];
+
+/** The next model down the chain, or null if `current` is last / not in the chain. */
+export function nextModel(current: string): string | null {
+  const i = MODEL_CHAIN.indexOf(current);
+  if (i === -1 || i === MODEL_CHAIN.length - 1) return null;
+  return MODEL_CHAIN[i + 1];
+}
+
+/** Last ~400 chars of a turn's output — enough to identify an unrecognised failure. */
+export function tail(text: string, n = 400): string {
+  const t = text.replace(/\s+/g, " ").trim();
+  return t.length <= n ? t : "…" + t.slice(-n);
+}
+
 /** Conservative fallback if we can't parse a concrete reset time — wait an hour. */
 export const RESET_FALLBACK_MS = 60 * 60 * 1000;
 

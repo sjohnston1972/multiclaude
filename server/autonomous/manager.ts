@@ -3,7 +3,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import type { AutonomousConfig, AutonomousEvent, AutonomousState } from "./types.js";
-import { hasBlockers, isUsageLimit, parseResetTime } from "./loop.js";
+import { hasBlockers, isUsageLimit, nextModel, parseResetTime, tail } from "./loop.js";
 import { parseStream, type ParsedEvent } from "./streamParse.js";
 import { renderEvent } from "./renderEvent.js";
 import { extractStep, parseGitLogLine, type StatusStrip } from "./status.js";
@@ -51,7 +51,13 @@ function allowedTools(extra?: string): string {
  * Build the pinned `claude` args for one invocation. `resume` false uses
  * `--session-id` (first call, pins the UUID); true uses `--resume`.
  */
-export function buildClaudeArgs(config: AutonomousConfig, sessionId: string, resume: boolean): string[] {
+export function buildClaudeArgs(
+  config: AutonomousConfig,
+  sessionId: string,
+  resume: boolean,
+  /** Active model — differs from config.model once the run has downgraded. */
+  model?: string,
+): string[] {
   const args = [
     "-p", AUTONOMOUS_PROMPT,
     resume ? "--resume" : "--session-id", sessionId,
@@ -60,7 +66,7 @@ export function buildClaudeArgs(config: AutonomousConfig, sessionId: string, res
     "--verbose",
     "--permission-mode", "acceptEdits",
     "--allowedTools", allowedTools(config.extraAllowRules),
-    "--model", config.model ?? "sonnet",
+    "--model", model ?? config.model ?? "sonnet",
   ];
   for (const dir of config.addDirs ?? []) args.push("--add-dir", dir);
   if (config.budgetUsd != null) args.push("--max-budget-usd", String(config.budgetUsd));
@@ -104,6 +110,10 @@ export class AutonomousManager {
   readonly sessionId: string;
   wakeAt: number | null = null;
   lastError: string | null = null;
+  /** Model actually spawned each turn. Starts at config.model; only ever moves down MODEL_CHAIN. */
+  activeModel: string;
+  /** Set once the run has downgraded, so the UI can say so instead of quietly using a lesser model. */
+  fellBackFrom: string | null = null;
 
   private state: AutonomousState = "preflight";
   private events: AutonomousEvent[] = [];
@@ -133,6 +143,7 @@ export class AutonomousManager {
     this.sessionId = config.sessionId ?? crypto.randomUUID();
     // A relaunch resumes an existing session, so the first call must use --resume.
     this.invoked = config.startResumed ?? false;
+    this.activeModel = config.model ?? "sonnet";
   }
 
   getState(): AutonomousState {
@@ -159,6 +170,8 @@ export class AutonomousManager {
       totalElapsedMs: (this.finishedAt ?? Date.now()) - this.startedAt,
       wakeAt: this.wakeAt,
       lastError: this.lastError,
+      activeModel: this.activeModel,
+      fellBackFrom: this.fellBackFrom,
     };
   }
 
@@ -225,13 +238,35 @@ export class AutonomousManager {
         await this.delay(this.config.turnDelayMs ?? DEFAULT_TURN_DELAY_MS);
         continue;
       }
+      // A failing turn downgrades while a cheaper model is left, rather than
+      // sleeping or stopping. Deliberately triggered by ANY non-zero exit, not
+      // just a matched limit message: we can't rely on recognising the exact
+      // wording of every credit/quota refusal, and an unmatched one must not
+      // silently end the run. Cost of the wider net is bounded — a genuine crash
+      // burns at most one extra attempt per remaining model, then surfaces below
+      // with its output intact.
+      const downgrade = nextModel(this.activeModel);
+      if (downgrade) {
+        const reason = isUsageLimit(this.turnText) ? "usage limit" : `exit ${code}`;
+        this.pushEvent("model-fallback", {
+          from: this.activeModel,
+          to: downgrade,
+          reason,
+          detail: tail(this.turnText),
+        });
+        this.fellBackFrom ??= this.activeModel;
+        this.activeModel = downgrade;
+        continue;
+      }
+
       if (isUsageLimit(this.turnText)) {
         this.wakeAt = parseResetTime(this.turnText, Date.now()) + Math.floor(Math.random() * RESET_JITTER_MS);
         this.setState("sleeping");
         this.scheduleResume();
         return;
       }
-      this.lastError = `claude exited with code ${code}`;
+      // Never fail blank: the output tail is the only clue to an unrecognised stop.
+      this.lastError = `claude (${this.activeModel}) exited with code ${code}: ${tail(this.turnText)}`;
       this.setState("error");
       break;
     }
@@ -296,7 +331,7 @@ export class AutonomousManager {
     return new Promise((resolve) => {
       const { command, args } = this.config.spawn ?? {
         command: "claude",
-        args: buildClaudeArgs(this.config, this.sessionId, resume),
+        args: buildClaudeArgs(this.config, this.sessionId, resume, this.activeModel),
       };
       let child: ChildProcess;
       try {

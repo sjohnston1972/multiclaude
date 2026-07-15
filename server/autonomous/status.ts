@@ -23,6 +23,10 @@ export interface StatusStrip {
   wakeAt: number | null;
   /** Last error/blocked reason, if any. */
   lastError: string | null;
+  /** Model spawned for the current turn — may be below the requested one after a fallback. */
+  activeModel: string;
+  /** The originally-requested model, set only once a fallback has happened. */
+  fellBackFrom: string | null;
 }
 
 /** Parse a "Step N", "Step N/M", or "Step N/M: Title" mention out of Claude's text. */

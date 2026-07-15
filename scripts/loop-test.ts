@@ -7,7 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { AutonomousManager } from "../server/autonomous/manager.js";
-import { parseResetTime, isUsageLimit, hasBlockers } from "../server/autonomous/loop.js";
+import { parseResetTime, isUsageLimit, hasBlockers, nextModel, tail } from "../server/autonomous/loop.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const stub = path.join(__dirname, "_stub", "fake-claude.mjs");
@@ -26,11 +26,12 @@ function seedRepo(withPlan = true) {
 }
 
 /** Run a scenario to completion (or to a non-running resting state) and return the manager. */
-async function run(cwd: string, scenario: string): Promise<AutonomousManager> {
+async function run(cwd: string, scenario: string, model?: string): Promise<AutonomousManager> {
   const prev = process.env.STUB_SCENARIO;
   process.env.STUB_SCENARIO = scenario;
   const mgr = new AutonomousManager({
     cwd,
+    model,
     turnDelayMs: 5,
     spawn: { command: process.execPath, args: [stub] },
   });
@@ -95,6 +96,39 @@ check("hasBlockers true on a real 'no'-starting blocker", hasBlockers("## Blocke
   check("(d) no events buffered (stub never spawned)", mgr.getEvents().length === 0, `events=${mgr.getEvents().length}`);
   fs.rmSync(dir, { recursive: true, force: true });
 }
+
+// --- (e) fable exhausts the chain rather than idling or dying silently -------
+{
+  const dir = seedRepo();
+  const mgr = await run(dir, "limit", "fable"); // stub reports a limit on every turn
+  const hops = mgr.getEvents().filter((e) => e.kind === "model-fallback");
+  check("(e) fable → opus → sonnet: two fallbacks", hops.length === 2, `hops=${hops.length}`);
+  check("(e) first hop is fable → opus", (hops[0]?.payload as any)?.to === "opus", JSON.stringify(hops[0]?.payload));
+  check("(e) second hop is opus → sonnet", (hops[1]?.payload as any)?.to === "sonnet", JSON.stringify(hops[1]?.payload));
+  check("(e) fallback records why it happened", (hops[0]?.payload as any)?.reason === "usage limit", JSON.stringify(hops[0]?.payload));
+  check("(e) activeModel ended at the bottom of the chain", mgr.activeModel === "sonnet", mgr.activeModel);
+  check("(e) fellBackFrom remembers the requested model", mgr.fellBackFrom === "fable", String(mgr.fellBackFrom));
+  // Only once sonnet — the last link — is limited does the old sleep behaviour apply.
+  check("(e) sleeps only after the chain is exhausted", mgr.getState() === "sleeping", mgr.getState());
+  mgr.stop();
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
+// --- (f) a pinned model id is never silently substituted ---------------------
+{
+  const dir = seedRepo();
+  const mgr = await run(dir, "limit", "claude-fable-5"); // not a chain alias
+  check("(f) pinned model id does not fall back", mgr.getEvents().every((e) => e.kind !== "model-fallback"));
+  check("(f) pinned model id still sleeps on a limit", mgr.getState() === "sleeping", mgr.getState());
+  check("(f) activeModel unchanged", mgr.activeModel === "claude-fable-5", mgr.activeModel);
+  mgr.stop();
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
+check("nextModel walks the chain down", nextModel("fable") === "opus" && nextModel("opus") === "sonnet");
+check("nextModel stops at the last link", nextModel("sonnet") === null);
+check("nextModel ignores unknown models", nextModel("claude-fable-5") === null);
+check("tail keeps the end of a long message", tail("x".repeat(500)).endsWith("x") && tail("abc") === "abc");
 
 console.log(`\n${failures === 0 ? "ALL PASS" : failures + " FAILURES"}`);
 process.exit(failures === 0 ? 0 : 1);

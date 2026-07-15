@@ -30,6 +30,8 @@ interface Status {
   totalElapsedMs: number;
   wakeAt: number | null;
   lastError: string | null;
+  activeModel?: string;
+  fellBackFrom?: string | null;
 }
 
 const STATE_STYLE: Record<string, { label: string; cls: string }> = {
@@ -261,6 +263,14 @@ export default function AutonomousTab({
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {status?.fellBackFrom && (
+        <div className="border-b border-amber-900 bg-amber-950/60 px-3 py-1.5 text-xs text-amber-200">
+          ⚠ Model fallback: {status.fellBackFrom} was unavailable, so this run is continuing on{" "}
+          <span className="font-mono">{status.activeModel}</span>. It will not switch back on its own — see the event
+          log for why.
         </div>
       )}
 
