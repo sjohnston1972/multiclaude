@@ -21,6 +21,7 @@ const headingCount = (s: string) => (s.match(/^##\s+Autonomous run discipline/gm
 // canonical block sanity: it's the 7-point version
 check("block is the 7-point version", /^7\.\s+\*\*Never scaffold half a step/m.test(DISCIPLINE_BLOCK));
 check("block starts with the heading", DISCIPLINE_HEADING.test(DISCIPLINE_BLOCK));
+check("rule 2 tells the run to push each commit", /git push/.test(DISCIPLINE_BLOCK));
 
 // --- append into a CLAUDE.md that has other content but no discipline --------
 {

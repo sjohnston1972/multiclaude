@@ -28,7 +28,10 @@ const RESET_JITTER_MS = 60_000; // spread wake-ups so we don't retry on the exac
 /** The baked-in autonomous run prompt (spec R10) — sent verbatim on every invocation. */
 export const AUTONOMOUS_PROMPT = `Read PLAN.md and PROGRESS.md as your first action. Identify the next incomplete
 step from PLAN.md. Do exactly that one step. Commit each change with a clear
-message referring to the step number. Append a timestamped entry to PROGRESS.md
+message referring to the step number, then push it with \`git push\` so the work
+never exists only on this machine — stay on the current branch, don't create one.
+If the push fails (no remote, no upstream, auth, rejected), that is NOT a blocker:
+note it in PROGRESS.md and carry on. Append a timestamped entry to PROGRESS.md
 when the step is verified done. If every step in PLAN.md is complete, create an
 empty file called DONE and stop. If the plan is ambiguous or a step cannot be
 completed, write a precise Blockers entry in PROGRESS.md, create DONE, and stop.

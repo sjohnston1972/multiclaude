@@ -23,8 +23,12 @@ session as an autonomous or resumable run and follow these rules:
    PLAN.md and PROGRESS.md as your first action on every turn.
 
 2. **Small resumable chunks.** Do one step from PLAN.md per turn. Commit
-   each change with a clear message referring to the step number. Append a
-   timestamped entry to PROGRESS.md when the step is done.
+   each change with a clear message referring to the step number, then `git push`
+   it — a run's work must never exist only on this machine. Append a timestamped
+   entry to PROGRESS.md when the step is done. Push to the branch the run is
+   already on; don't create branches. If the push fails (no remote, no upstream,
+   auth, rejected), that is NOT a blocker: note it in PROGRESS.md and carry on —
+   the commits are still safe locally.
 
 3. **DONE marker.** When every step in PLAN.md is complete, create an
    empty file called DONE and stop.

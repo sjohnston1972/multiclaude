@@ -22,7 +22,10 @@ import path from "node:path";
 // The baked-in autonomous run prompt (spec R10) — sent verbatim every turn.
 const R10_PROMPT = `Read PLAN.md and PROGRESS.md as your first action. Identify the next incomplete
 step from PLAN.md. Do exactly that one step. Commit each change with a clear
-message referring to the step number. Append a timestamped entry to PROGRESS.md
+message referring to the step number, then push it with \`git push\` so the work
+never exists only on this machine — stay on the current branch, don't create one.
+If the push fails (no remote, no upstream, auth, rejected), that is NOT a blocker:
+note it in PROGRESS.md and carry on. Append a timestamped entry to PROGRESS.md
 when the step is verified done. If every step in PLAN.md is complete, create an
 empty file called DONE and stop. If the plan is ambiguous or a step cannot be
 completed, write a precise Blockers entry in PROGRESS.md, create DONE, and stop.
@@ -38,8 +41,11 @@ session as an autonomous or resumable run and follow these rules:
 1. **State on disk is truth.** Never trust prior context. Always re-read
    PLAN.md and PROGRESS.md as your first action on every turn.
 2. **Small resumable chunks.** Do one step from PLAN.md per turn. Commit
-   each change with a clear message referring to the step number. Append a
-   timestamped entry to PROGRESS.md when the step is done.
+   each change with a clear message referring to the step number, then \`git push\`
+   it — a run's work must never exist only on this machine. Stay on the current
+   branch; don't create one. A failed push is not a blocker: note it in
+   PROGRESS.md and carry on. Append a timestamped entry to PROGRESS.md when the
+   step is done.
 3. **DONE marker.** When every step in PLAN.md is complete, create an empty
    file called DONE and stop.
 4. **Never delete state files.** PLAN.md, PROGRESS.md, and DONE are the
