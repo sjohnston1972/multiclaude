@@ -69,6 +69,26 @@ export interface LaunchedTab {
   taskName: string;
 }
 
+/** A run the server still knows about — reopenable whether or not its tab is open. */
+interface PastRun {
+  id: string;
+  taskName: string;
+  projectDir: string;
+  model: string;
+  state: string;
+  currentStep: string | null;
+  costUsd: number;
+  startedAt: number;
+}
+
+const RUN_STATE_STYLE: Record<string, string> = {
+  running: "border-blue-600 bg-blue-950/40 text-blue-200",
+  sleeping: "border-amber-700 bg-amber-950/40 text-amber-200",
+  blocked: "border-amber-600 bg-amber-950/50 text-amber-200",
+  error: "border-red-800 bg-red-950/50 text-red-200",
+  done: "border-green-800 bg-green-950/40 text-green-200",
+};
+
 export default function AutonomousNewDialog({
   onLaunched,
   onDraftPlan,
@@ -100,11 +120,18 @@ export default function AutonomousNewDialog({
   const [error, setError] = useState<string | null>(null);
   const [showHelp, setShowHelp] = useState(!hasOnboarded());
   const [readyRepos, setReadyRepos] = useState<{ path: string; name: string; status: string }[]>([]);
+  const [pastRuns, setPastRuns] = useState<PastRun[]>([]);
 
   useEffect(() => {
     fetch("/api/autonomous/ready")
       .then((r) => r.json())
       .then((d) => setReadyRepos(d.repos ?? []))
+      .catch(() => {});
+    // Runs outlive their tab and the server itself, but closing the tab used to
+    // lose the only handle on one. List them so a run can always be reopened.
+    fetch("/api/autonomous")
+      .then((r) => r.json())
+      .then((d: PastRun[]) => setPastRuns(Array.isArray(d) ? [...d].sort((a, b) => b.startedAt - a.startedAt) : []))
       .catch(() => {});
   }, []);
 
@@ -261,6 +288,37 @@ export default function AutonomousNewDialog({
             ⍰ Help
           </button>
         </div>
+
+        {pastRuns.length > 0 && (
+          <div className="rounded border border-neutral-800 bg-neutral-900/60 p-2">
+            <div className="mb-1.5 text-xs text-neutral-400">
+              Past runs — click to reopen its tab (the run and its history are still on the server):
+            </div>
+            <div className="max-h-32 space-y-1 overflow-y-auto">
+              {pastRuns.map((r) => (
+                <button
+                  key={r.id}
+                  onClick={() => {
+                    onLaunched({ id: r.id, taskName: r.taskName });
+                    onClose();
+                  }}
+                  title={`${r.projectDir}\nStarted ${new Date(r.startedAt).toLocaleString()}\nReopening only shows the tab — nothing restarts until you click Resume.`}
+                  className="flex w-full items-center gap-2 rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-left text-xs hover:border-blue-500"
+                >
+                  <span className={"rounded border px-1 " + (RUN_STATE_STYLE[r.state] ?? "border-neutral-600 text-neutral-300")}>
+                    {r.state}
+                  </span>
+                  <span className="font-mono text-neutral-200">⚙ {r.taskName}</span>
+                  <span className="text-neutral-500">
+                    {r.model}
+                    {r.currentStep ? ` · ${r.currentStep}` : ""}
+                    {r.costUsd > 0 ? ` · $${r.costUsd.toFixed(2)}` : ""}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         {readyRepos.length > 0 && (
           <div>

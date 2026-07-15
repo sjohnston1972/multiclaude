@@ -11,7 +11,7 @@ import { registerLauncherRoutes } from "./launcher.js";
 import { pruneOldImages, registerImageRoutes } from "./images.js";
 import { registerAutonomousRoutes } from "./autonomous/routes.js";
 import { attachAutonomousViewer } from "./autonomous/manager.js";
-import { getManager, loadPersisted } from "./autonomous/registry.js";
+import { getManager, getTab, loadPersisted } from "./autonomous/registry.js";
 import { autonomousStatus } from "./autonomous/discovery.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -333,7 +333,17 @@ const autonomousWss = new WebSocketServer({ noServer: true });
 autonomousWss.on("connection", (ws: WebSocket, tabId: string) => {
   const manager = getManager(tabId);
   if (!manager) {
-    ws.send(JSON.stringify({ type: "error", message: "No such autonomous tab (it may have ended)." }));
+    // A reopened run has a record but no live supervisor (server restarted, or the
+    // run finished). That's not an error — say what it is and what to do about it.
+    const known = getTab(tabId);
+    ws.send(
+      JSON.stringify({
+        type: "error",
+        message: known
+          ? `This run isn't live right now (last state: ${known.state}). Click Resume to continue it from where it left off — its session and history are intact.`
+          : "No such autonomous run — it may have been removed.",
+      }),
+    );
     ws.close();
     return;
   }
