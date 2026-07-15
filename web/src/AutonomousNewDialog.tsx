@@ -39,7 +39,7 @@ const HINTS = {
   taskName:
     "A short kebab-case id for this run. Becomes the state-dir name (.multiclaude/<task>/) and the rollback tag (multiclaude-launch-<task>-<time>). Keep it unique per repo.",
   model:
-    "Which Claude model runs each turn. 'sonnet' is the cost-effective default for long or overnight runs; 'opus' is stronger but pricier. Each resolves to the CLI's current alias.",
+    "Which Claude model runs each turn. 'sonnet' is the cost-effective default for long or overnight runs; 'opus' is stronger but pricier; 'fable' is the most capable and the priciest — best for a hard, long-horizon run you'd rather have finish correctly than cheaply. Each resolves to the CLI's current alias.",
   budget:
     "Hard per-invocation spend ceiling (maps to --max-budget-usd). This is the ONLY hard cost cap — there is no turn cap; the one-step-per-turn bound comes from the plan + discipline. Leave blank for no limit.",
   addDirs:
@@ -305,6 +305,7 @@ export default function AutonomousNewDialog({
             <select value={model} onChange={(e) => setModel(e.target.value)} className="mt-1 w-full rounded border border-neutral-700 bg-neutral-950 px-2 py-1 text-neutral-100">
               <option value="sonnet">sonnet</option>
               <option value="opus">opus</option>
+              <option value="fable">fable</option>
             </select>
           </label>
           <label className="block" title={HINTS.budget}>
