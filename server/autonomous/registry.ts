@@ -73,6 +73,7 @@ export function createTab(input: CreateTabInput): AutonomousRecord {
     budgetUsd: input.budgetUsd ?? undefined,
     extraAllowRules: input.extraAllowRules,
     sessionId: input.sessionId,
+    launchTag: input.launchTag ?? undefined,
     spawn: spawnOverride ?? undefined,
   });
   const record: AutonomousRecord = {
@@ -131,6 +132,7 @@ export function relaunchTab(id: string): AutonomousRecord | undefined {
     budgetUsd: record.budgetUsd ?? undefined,
     extraAllowRules: record.extraAllowRules,
     sessionId: record.sessionId, // reuse the pinned UUID → --resume continues the conversation
+    launchTag: record.launchTag ?? undefined,
     startResumed: true,
     spawn: spawnOverride ?? undefined,
   });

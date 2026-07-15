@@ -36,6 +36,14 @@ if (scenario === "limit") {
   process.exit(1);
 }
 
+if (scenario === "dirty-fail") {
+  // Half-writes a file then dies, like a run killed mid-step. The manager should
+  // salvage the leftovers into a WIP commit so the tree ends clean.
+  fs.writeFileSync(path.join(cwd, "half-written.ts"), "export const partial = ");
+  emit({ type: "assistant", message: { content: [{ type: "text", text: "API Error: Connection closed mid-response." }] } });
+  process.exit(1);
+}
+
 if (scenario === "flaky") {
   const counter = path.join(cwd, ".stub-calls");
   const calls = (fs.existsSync(counter) ? Number(fs.readFileSync(counter, "utf8")) : 0) + 1;

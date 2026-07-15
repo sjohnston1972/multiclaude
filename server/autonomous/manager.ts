@@ -292,6 +292,9 @@ export class AutonomousManager {
         this.scheduleResume();
         return;
       }
+      // Salvage before reporting: a dying run must not leave a dirty tree that
+      // blocks the next launch's clean-tree pre-flight.
+      await this.commitPartialWork(reason);
       // Never fail blank: the output tail is the only clue to an unrecognised stop.
       this.lastError = `claude (${this.activeModel}) exited with code ${code} after ${backoff.length} retries and no model left to fall back to: ${tail(this.turnText)}`;
       this.setState("error");
@@ -318,6 +321,53 @@ export class AutonomousManager {
     } catch {
       return false;
     }
+  }
+
+  /**
+   * Salvage a dying run's half-finished work.
+   *
+   * A run that died mid-step used to leave its edits uncommitted, which tripped
+   * the next launch's clean-tree pre-flight and left Steven to commit or stash by
+   * hand. We can't just relax that gate — it's what stops Rollback's
+   * `git reset --hard && git clean -fd` from destroying unrelated work — so the
+   * dying run cleans up after itself instead: whatever is in the tree becomes one
+   * clearly-marked WIP commit. The work stays visible in `git log` rather than
+   * lurking as a dirty tree, and the run's rollback tag still reverts it.
+   *
+   * Deliberately NOT pushed: this code is unverified by definition, and the
+   * discipline only pushes steps that passed their own check.
+   *
+   * Best-effort — a failure here is surfaced as an event and never replaces the
+   * original error that killed the run.
+   */
+  private commitPartialWork(reason: string): Promise<void> {
+    return new Promise((resolve) => {
+      const cwd = this.config.cwd;
+      execFile("git", ["-C", cwd, "status", "--porcelain"], { windowsHide: true }, (err, stdout) => {
+        if (err || !stdout.trim()) return resolve(); // not a repo, or nothing to salvage
+        const files = stdout.trim().split(/\r?\n/).length;
+        const step = this.currentStep ?? "an unknown step";
+        const msg =
+          `wip: partial ${step} — run aborted (${reason})\n\n` +
+          `Auto-committed by multiclaude so the working tree is clean for the next run.\n` +
+          `This work was NOT verified and may be half-finished. To discard it, roll the\n` +
+          `run back with its launch tag (${this.config.launchTag ?? "see the run's tag"}).`;
+        execFile("git", ["-C", cwd, "add", "-A"], { windowsHide: true }, (addErr) => {
+          if (addErr) {
+            this.pushEvent("wip-commit", { ok: false, message: tail(addErr.message) });
+            return resolve();
+          }
+          execFile("git", ["-C", cwd, "commit", "-m", msg], { windowsHide: true }, (cErr, cOut) => {
+            if (cErr) {
+              this.pushEvent("wip-commit", { ok: false, message: tail(cErr.message) });
+              return resolve();
+            }
+            this.pushEvent("wip-commit", { ok: true, files, step, reason, detail: tail(cOut) });
+            resolve();
+          });
+        });
+      });
+    });
   }
 
   /** Reconcile last-commit from git (decisions Q2 — event-driven, at the turn boundary, not a timer). */
@@ -443,9 +493,12 @@ export class AutonomousManager {
 
   /** R5 Kill: hard stop; the working tree may be mid-step, so mark it inconsistent. */
   kill(): void {
-    this.stop();
+    this.stop(); // kills the process tree first, so nothing is still writing
     this.lastError = "Killed — the working tree may be mid-step; state could be inconsistent.";
     this.setState("error");
+    // Salvage in the background: kill() is sync for the route, and the wip-commit
+    // event tells the UI when the tree has been cleaned up.
+    void this.commitPartialWork("killed mid-step");
   }
 
   /** R5 Resume: re-enter the loop; the session already exists, so the first call uses --resume. */

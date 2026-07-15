@@ -45,6 +45,8 @@ export interface AutonomousConfig {
   cwd: string;
   /** Reuse a pinned session UUID (relaunch after a restart, R9). Generated if absent. */
   sessionId?: string;
+  /** The run's rollback tag — named in the WIP commit so it says how to undo itself. */
+  launchTag?: string;
   /** Pause between successful turns, ms (default 10 000). Tests set it small. */
   turnDelayMs?: number;
   /** Relaunch of an existing session: the first call uses --resume, not --session-id. */

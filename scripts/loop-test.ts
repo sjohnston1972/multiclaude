@@ -2,6 +2,7 @@
 // the state-file integrity guard. Deterministic via the fake-claude stub.
 // Run with:  npx tsx scripts/loop-test.ts
 
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -95,6 +96,34 @@ check("hasBlockers true on a real 'no'-starting blocker", hasBlockers("## Blocke
   const mgr = await run(dir, "ok");
   check("(d) absent PLAN.md from the start → error before any spawn", mgr.getState() === "error", mgr.getState());
   check("(d) no events buffered (stub never spawned)", mgr.getEvents().length === 0, `events=${mgr.getEvents().length}`);
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
+// --- (g) a dying run leaves the tree clean for the next launch ---------------
+// The gate it must not trip is pre-flight's clean-tree check; leaving a dirty
+// tree is what forced a manual commit/stash after every mid-step death.
+{
+  const dir = seedRepo();
+  const git = (...a: string[]) => execFileSync("git", ["-C", dir, ...a], { stdio: "pipe" });
+  git("init", "-q");
+  git("config", "user.email", "test@example.com");
+  git("config", "user.name", "test");
+  git("add", "-A");
+  git("commit", "-q", "-m", "seed");
+
+  const mgr = await run(dir, "dirty-fail", "sonnet"); // sonnet = no downgrade; retries then errors
+  const porcelain = execFileSync("git", ["-C", dir, "status", "--porcelain"], { encoding: "utf8" });
+  const subject = execFileSync("git", ["-C", dir, "log", "-1", "--format=%s"], { encoding: "utf8" }).trim();
+  const body = execFileSync("git", ["-C", dir, "log", "-1", "--format=%b"], { encoding: "utf8" });
+  const wip = mgr.getEvents().filter((e) => e.kind === "wip-commit");
+
+  check("(g) run ended in error", mgr.getState() === "error", mgr.getState());
+  check("(g) working tree is clean again — next launch won't be blocked", porcelain.trim() === "", JSON.stringify(porcelain));
+  check("(g) partial work was committed, not discarded", subject.startsWith("wip:"), subject);
+  check("(g) the half-written file survived in the commit", execFileSync("git", ["-C", dir, "show", "--stat", "HEAD"], { encoding: "utf8" }).includes("half-written.ts"));
+  check("(g) commit says why the run aborted", subject.includes("aborted"), subject);
+  check("(g) commit body warns the work is unverified", body.includes("NOT verified"), body.trim());
+  check("(g) a wip-commit event was emitted", wip.length === 1 && (wip[0]?.payload as any)?.ok === true, JSON.stringify(wip[0]?.payload));
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
