@@ -42,6 +42,9 @@ note it in PROGRESS.md and carry on. Append a timestamped entry to PROGRESS.md
 when the step is verified done. If every step in PLAN.md is complete, create an
 empty file called DONE and stop. If the plan is ambiguous or a step cannot be
 completed, write a precise Blockers entry in PROGRESS.md, create DONE, and stop.
+The working tree may contain half-finished edits from an interrupted earlier
+attempt at this same step — run \`git status\` and \`git diff\` before starting,
+and continue that work rather than restarting it.
 Always re-read PLAN.md and PROGRESS.md at the start of every turn — never trust
 prior context. Your PROGRESS.md entry is the only thing the next turn will see —
 it starts a new session with no memory of this one. Write down anything it needs:
@@ -248,6 +251,9 @@ export class AutonomousManager {
       // conversation id so .multiclaude/<task>/'s session file names a real one.
       const fresh = this.config.freshSessionPerTurn !== false;
       const resume = fresh ? false : this.invoked;
+      // On turn 1, `invoked` is still false (see the constructor), so this falls
+      // through to `this.sessionId` — the run's persistent UUID doubles as turn
+      // 1's conversation id. Only turn 2+ under fresh mode mints a new one.
       const conversationId = fresh && this.invoked ? crypto.randomUUID() : this.sessionId;
       this.invoked = true;
       this.pushEvent("turn-begin", { conversationId, model: this.activeModel, resumed: resume });

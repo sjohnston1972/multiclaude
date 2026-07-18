@@ -173,6 +173,20 @@ check("hasBlockers true on a real 'no'-starting blocker", hasBlockers("## Blocke
   check("(e) sleeps until the limit resets", mgr.getState() === "sleeping", mgr.getState());
   check("(e) wakeAt is in the future", (mgr.wakeAt ?? 0) > Date.now(), String(mgr.wakeAt));
   check("(e) emits a usage-limit event with the message", limits.length === 1 && String((limits[0]?.payload as any)?.detail).includes("limit"), JSON.stringify(limits[0]?.payload));
+  // This scenario sleeps after its very first turn, so it can't observe a real
+  // post-wakeup second turn-begin (that would need the pending resume timer to
+  // fire, which is real wall-clock time away — `wakeAt` is minutes/hours out).
+  // What IS observable and worth pinning: the one turn that did run was begun in
+  // fresh mode exactly like any other turn — same conversation-id rule, same
+  // resumed:false — and `scheduleResume()` re-enters the same `loop()` used by a
+  // retry-continue, so (e0)'s proof that a subsequent turn there mints a fresh id
+  // covers the code path a post-wakeup turn would take; there is just no
+  // deterministic scenario here that lets a second turn-begin actually fire.
+  const begins = mgr.getEvents().filter((e) => e.kind === "turn-begin");
+  const ids = begins.map((e) => (e.payload as any).conversationId as string);
+  check("(e) exactly one turn ran before sleeping", begins.length === 1, `begins=${begins.length}`);
+  check("(e) that turn used the pinned run UUID (turn 1 borrows it)", ids[0] === mgr.sessionId, `${ids[0]} vs ${mgr.sessionId}`);
+  check("(e) that turn did not resume", (begins[0]?.payload as any)?.resumed === false, JSON.stringify(begins[0]?.payload));
   mgr.stop();
   fs.rmSync(dir, { recursive: true, force: true });
 }
@@ -240,7 +254,9 @@ check("tail keeps the end of a long message", tail("x".repeat(500)).endsWith("x"
 // --- the prompt states the handoff contract fresh sessions depend on ---------
 check(
   "prompt says PROGRESS.md is the only channel to the next turn",
-  AUTONOMOUS_PROMPT.includes("only thing the next turn will see"),
+  AUTONOMOUS_PROMPT.includes(
+    "Your PROGRESS.md entry is the only thing the next turn will see —\nit starts a new session with no memory of this one."
+  ),
   AUTONOMOUS_PROMPT.slice(-200)
 );
 check(
