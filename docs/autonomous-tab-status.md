@@ -10,8 +10,9 @@ step per turn, a commit per step, stop on DONE or on a Blockers entry. The serve
 ## What v1 delivers
 
 - **Supervisor** (`server/autonomous/`): an in-server `AutonomousManager` spawns `claude` headless
-  (piped stdout, stdin ignored), runs the R8 loop (`--session-id` first, `--resume` after; sleep on
-  usage limit; stop on DONE), and guards against running when PLAN.md/PROGRESS.md vanish.
+  (piped stdout, stdin ignored), runs the R8 loop (fresh session per turn by default; sleep on
+  usage limit; stop on DONE; see v2 l. 87), and guards against running when PLAN.md/PROGRESS.md
+  vanish.
 - **Event pipeline**: robust `stream-json` framing (`readline`, raw fallback) → human log lines
   (📖/💭/🔧/🖥️/✅/📝) → derived R2 status strip (step, last commit, cost, elapsed).
 - **Transport**: REST (`/api/autonomous…`) + a per-tab WebSocket (`/ws/autonomous?tab=`) with
