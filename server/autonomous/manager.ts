@@ -43,7 +43,10 @@ when the step is verified done. If every step in PLAN.md is complete, create an
 empty file called DONE and stop. If the plan is ambiguous or a step cannot be
 completed, write a precise Blockers entry in PROGRESS.md, create DONE, and stop.
 Always re-read PLAN.md and PROGRESS.md at the start of every turn — never trust
-prior context.`;
+prior context. Your PROGRESS.md entry is the only thing the next turn will see —
+it starts a new session with no memory of this one. Write down anything it needs:
+decisions you made, things you discovered, and anything you tried that did not
+work.`;
 
 /** Default scoped Bash allowlist — the tightest set proven to land a commit in the Step 1 spike (Rung A). */
 export const DEFAULT_ALLOWED_TOOLS =

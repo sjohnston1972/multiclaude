@@ -7,7 +7,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { AutonomousManager, buildClaudeArgs } from "../server/autonomous/manager.js";
+import { AutonomousManager, buildClaudeArgs, AUTONOMOUS_PROMPT } from "../server/autonomous/manager.js";
 import { parseResetTime, isUsageLimit, hasBlockers, nextModel, tail } from "../server/autonomous/loop.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -236,6 +236,18 @@ check("tail keeps the end of a long message", tail("x".repeat(500)).endsWith("x"
   check("legacy mode still emits --resume", legacy.includes("--resume"), JSON.stringify(legacy));
   check("legacy mode omits --session-id", !legacy.includes("--session-id"), JSON.stringify(legacy));
 }
+
+// --- the prompt states the handoff contract fresh sessions depend on ---------
+check(
+  "prompt says PROGRESS.md is the only channel to the next turn",
+  AUTONOMOUS_PROMPT.includes("only thing the next turn will see"),
+  AUTONOMOUS_PROMPT.slice(-200)
+);
+check(
+  "prompt still forbids trusting prior context",
+  AUTONOMOUS_PROMPT.includes("never trust\nprior context"),
+  AUTONOMOUS_PROMPT.slice(-200)
+);
 
 console.log(`\n${failures === 0 ? "ALL PASS" : failures + " FAILURES"}`);
 process.exit(failures === 0 ? 0 : 1);
