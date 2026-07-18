@@ -56,18 +56,20 @@ function allowedTools(extra?: string): string {
 
 /**
  * Build the pinned `claude` args for one invocation. `resume` false uses
- * `--session-id` (first call, pins the UUID); true uses `--resume`.
+ * `--session-id <conversationId>` (fresh mode, and the first call of a legacy
+ * run); true uses `--resume`. The conversation id is NOT the run id — see
+ * AutonomousManager.sessionId.
  */
 export function buildClaudeArgs(
   config: AutonomousConfig,
-  sessionId: string,
+  conversationId: string,
   resume: boolean,
   /** Active model — differs from config.model once the run has downgraded. */
   model?: string,
 ): string[] {
   const args = [
     "-p", AUTONOMOUS_PROMPT,
-    resume ? "--resume" : "--session-id", sessionId,
+    resume ? "--resume" : "--session-id", conversationId,
     "--output-format", "stream-json",
     "--include-partial-messages",
     "--verbose",
@@ -131,7 +133,7 @@ export class AutonomousManager {
   private stateListeners = new Set<(s: AutonomousState) => void>();
   private child: ChildProcess | null = null;
   private stopped = false;
-  private invoked = false; // false → first call uses --session-id; true → --resume
+  private invoked = false; // false → this is the run's first invocation
   private looping = false;
   private turnText = ""; // accumulated text for the current turn (limit detection)
   private delayTimer: ReturnType<typeof setTimeout> | null = null;
@@ -237,9 +239,16 @@ export class AutonomousManager {
       this.setState("running");
       this.turnText = "";
       this.turnStartAt = Date.now();
-      const resume = this.invoked;
+      // Fresh mode (default): every turn is its own conversation, so cost per
+      // turn stays flat instead of growing with the transcript. The run's
+      // identity is this.sessionId and is untouched; turn 1 borrows it as its
+      // conversation id so .multiclaude/<task>/'s session file names a real one.
+      const fresh = this.config.freshSessionPerTurn !== false;
+      const resume = fresh ? false : this.invoked;
+      const conversationId = fresh && this.invoked ? crypto.randomUUID() : this.sessionId;
       this.invoked = true;
-      const { code } = await this.invokeOnce(resume);
+      this.pushEvent("turn-begin", { conversationId, model: this.activeModel, resumed: resume });
+      const { code } = await this.invokeOnce(resume, conversationId);
       await this.reconcileLastCommit(); // turn boundary — decisions Q2
       if (this.stopped) return;
 
@@ -419,11 +428,11 @@ export class AutonomousManager {
     }, ms);
   }
 
-  private invokeOnce(resume: boolean): Promise<{ code: number }> {
+  private invokeOnce(resume: boolean, conversationId: string): Promise<{ code: number }> {
     return new Promise((resolve) => {
       const { command, args } = this.config.spawn ?? {
         command: "claude",
-        args: buildClaudeArgs(this.config, this.sessionId, resume, this.activeModel),
+        args: buildClaudeArgs(this.config, conversationId, resume, this.activeModel),
       };
       let child: ChildProcess;
       try {
