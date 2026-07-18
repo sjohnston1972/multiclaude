@@ -84,6 +84,12 @@ Built and deployed after the v1 plan, each as its own committed + verified chang
 - **Cache-hit %** in the status strip — share of input tokens served from the prompt cache, from each
   turn's `result.usage`; a live gauge of resume efficiency.
 - **Persistent "⚙ Autonomous" top-bar button** — reopens pre-flight pre-filled with the last project.
+- **Fresh session per turn** — the loop no longer resumes one growing conversation. Each turn
+  mints its own conversation id, so per-turn cost is flat instead of quadratic in run length and
+  a post-limit wakeup is no longer the most expensive turn of the run. The run's pinned UUID is
+  unchanged; `freshSessionPerTurn: false` restores the old behaviour for comparison. Expect the
+  cache-hit % gauge to drop sharply — that is the trade, not a regression. Design:
+  `docs/superpowers/specs/2026-07-18-fresh-session-per-turn-design.md`.
 
 Server default is now LAN mode on this machine (persistent env vars), per operator preference.
 
