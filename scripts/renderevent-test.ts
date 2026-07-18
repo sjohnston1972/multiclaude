@@ -1,5 +1,6 @@
-// Verifies the event → human line renderer (Step 5): each of the six R3 icon
-// kinds maps correctly, and the turn divider is well-formed.
+// Verifies the event → human line renderer (Step 5): each of the R3 icon
+// kinds maps correctly (including turn-begin, added for fresh-session-per-turn),
+// and the turn divider is well-formed.
 // Run with:  npx tsx scripts/renderevent-test.ts
 
 import { renderEvent, renderTurnDivider, formatDuration } from "../server/autonomous/renderEvent.js";
@@ -44,6 +45,20 @@ check("assistant with text+tool_use → 2 lines", multi.length === 2 && multi[0]
 
 // non-visible events render to nothing
 check("system/init renders nothing", render('{"type":"system","subtype":"init"}').length === 0);
+
+// 🔄 turn-begin (not a stream-json line — pushed directly by the manager)
+const turnBegin = renderEvent({ kind: "turn-begin", payload: { conversationId: "abcdef1234567890", model: "sonnet", resumed: false } })[0];
+check(
+  "🔄 turn-begin (fresh) → New turn — conversation <short id>",
+  turnBegin?.icon === "🔄" && turnBegin.summary === "New turn — conversation abcdef12",
+  JSON.stringify(turnBegin)
+);
+const turnResumed = renderEvent({ kind: "turn-begin", payload: { conversationId: "abcdef1234567890", model: "sonnet", resumed: true } })[0];
+check(
+  "🔄 turn-begin (resumed) → Resuming turn — conversation <short id>",
+  turnResumed?.icon === "🔄" && turnResumed.summary === "Resuming turn — conversation abcdef12",
+  JSON.stringify(turnResumed)
+);
 
 // turn divider
 check("formatDuration under a minute", formatDuration(12_000) === "12s");

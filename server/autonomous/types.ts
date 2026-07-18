@@ -49,8 +49,15 @@ export interface AutonomousConfig {
   launchTag?: string;
   /** Pause between successful turns, ms (default 10 000). Tests set it small. */
   turnDelayMs?: number;
-  /** Relaunch of an existing session: the first call uses --resume, not --session-id. */
+  /** Relaunch of an existing session: legacy mode's first call uses --resume. Ignored when freshSessionPerTurn is true. */
   startResumed?: boolean;
+  /**
+   * Mint a new conversation id for every turn instead of resuming one growing
+   * session (design 2026-07-18). Default true. The run's own `sessionId` is
+   * unaffected — it stays the persistent run identity. Set false to restore the
+   * old resuming behaviour for comparison.
+   */
+  freshSessionPerTurn?: boolean;
   /** Model alias, default `sonnet`. */
   model?: string;
   /**

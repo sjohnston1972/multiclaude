@@ -86,6 +86,15 @@ export function renderEvent(ev: ParsedEvent): RenderedLine[] {
     return [{ icon: "⚠️", summary: firstLine((ev.payload as { line?: string }).line) }];
   }
 
+  if (ev.kind === "turn-begin") {
+    const { conversationId, resumed } = ev.payload as { conversationId?: string; resumed?: boolean };
+    const shortId = typeof conversationId === "string" ? conversationId.slice(0, 8) : "unknown";
+    return [{
+      icon: "🔄",
+      summary: resumed ? `Resuming turn — conversation ${shortId}` : `New turn — conversation ${shortId}`,
+    }];
+  }
+
   // system/init, stream_event partials, result — nothing to render inline.
   return [];
 }

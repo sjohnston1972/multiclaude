@@ -10,8 +10,9 @@ step per turn, a commit per step, stop on DONE or on a Blockers entry. The serve
 ## What v1 delivers
 
 - **Supervisor** (`server/autonomous/`): an in-server `AutonomousManager` spawns `claude` headless
-  (piped stdout, stdin ignored), runs the R8 loop (`--session-id` first, `--resume` after; sleep on
-  usage limit; stop on DONE), and guards against running when PLAN.md/PROGRESS.md vanish.
+  (piped stdout, stdin ignored), runs the R8 loop (fresh session per turn by default — see the v2
+  additions below; sleep on usage limit; stop on DONE), and guards against running when
+  PLAN.md/PROGRESS.md vanish.
 - **Event pipeline**: robust `stream-json` framing (`readline`, raw fallback) → human log lines
   (📖/💭/🔧/🖥️/✅/📝) → derived R2 status strip (step, last commit, cost, elapsed).
 - **Transport**: REST (`/api/autonomous…`) + a per-tab WebSocket (`/ws/autonomous?tab=`) with
@@ -19,7 +20,8 @@ step per turn, a commit per step, stop on DONE or on a Blockers entry. The serve
 - **UI**: status strip + live event log + raw toggle, a side pane with live PROGRESS.md/PLAN.md and
   a prominent Blockers banner, and Pause/Resume/Kill/Rollback controls.
 - **Persistence**: first-class tab records in `autonomous.json`; relaunch after a restart reuses the
-  pinned UUID.
+  pinned UUID as the record's identity — the conversation itself is fresh, not resumed (see the
+  Fresh session per turn entry below).
 - **Pre-flight** (R6) gating Launch, including the PLAN.md path scan that catches the exact
   sibling-repo blocker from the 2026-07-13 run.
 - **Launch/rollback** (R7/R5): rollback tag + gitignored state dir at launch; one-click
@@ -84,6 +86,16 @@ Built and deployed after the v1 plan, each as its own committed + verified chang
 - **Cache-hit %** in the status strip — share of input tokens served from the prompt cache, from each
   turn's `result.usage`; a live gauge of resume efficiency.
 - **Persistent "⚙ Autonomous" top-bar button** — reopens pre-flight pre-filled with the last project.
+- **Fresh session per turn** — the loop no longer resumes one growing conversation. Each turn
+  mints its own conversation id, so per-turn cost is roughly flat rather than growing with the
+  transcript, and a post-limit wakeup is no longer the most expensive turn of the run. This is
+  not a flat *total* cost, though: every fresh turn still re-reads PROGRESS.md, which only grows
+  over a run, so total cost stays quadratic in run length with a far smaller constant than before.
+  Worth watching on a long run — PROGRESS.md is now both the only thing that accumulates context
+  across turns and is being asked to carry more (decisions, dead ends), which makes it the actual
+  cost driver. The run's pinned UUID is unchanged; `freshSessionPerTurn: false` restores the old
+  behaviour for comparison. Expect the cache-hit % gauge to drop sharply — that is the trade, not
+  a regression. Design: `docs/superpowers/specs/2026-07-18-fresh-session-per-turn-design.md`.
 
 Server default is now LAN mode on this machine (persistent env vars), per operator preference.
 

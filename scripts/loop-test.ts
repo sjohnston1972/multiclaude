@@ -7,7 +7,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { AutonomousManager } from "../server/autonomous/manager.js";
+import { AutonomousManager, buildClaudeArgs, AUTONOMOUS_PROMPT } from "../server/autonomous/manager.js";
 import { parseResetTime, isUsageLimit, hasBlockers, nextModel, tail } from "../server/autonomous/loop.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -27,7 +27,12 @@ function seedRepo(withPlan = true) {
 }
 
 /** Run a scenario to completion (or to a non-running resting state) and return the manager. */
-async function run(cwd: string, scenario: string, model?: string): Promise<AutonomousManager> {
+async function run(
+  cwd: string,
+  scenario: string,
+  model?: string,
+  extra?: Partial<import("../server/autonomous/types.js").AutonomousConfig>
+): Promise<AutonomousManager> {
   const prev = process.env.STUB_SCENARIO;
   process.env.STUB_SCENARIO = scenario;
   const mgr = new AutonomousManager({
@@ -36,6 +41,7 @@ async function run(cwd: string, scenario: string, model?: string): Promise<Auton
     turnDelayMs: 5,
     retryBackoffMs: [1, 1, 1], // real backoff is 5s/20s/60s — too slow for a test
     spawn: { command: process.execPath, args: [stub] },
+    ...extra,
   });
   await mgr.start();
   if (prev === undefined) delete process.env.STUB_SCENARIO;
@@ -138,6 +144,13 @@ check("hasBlockers true on a real 'no'-starting blocker", hasBlockers("## Blocke
   check("(e0) exactly one retry was needed", retries.length === 1, `retries=${retries.length}`);
   check("(e0) retried on the same model — no downgrade", mgr.activeModel === "fable" && mgr.fellBackFrom === null, mgr.activeModel);
   check("(e0) retry event records the real message", String((retries[0]?.payload as any)?.detail).includes("Connection closed"), JSON.stringify(retries[0]?.payload));
+  const begins = mgr.getEvents().filter((e) => e.kind === "turn-begin");
+  const ids = begins.map((e) => (e.payload as any).conversationId as string);
+  check("(e0) two turns were begun", begins.length === 2, `begins=${begins.length}`);
+  check("(e0) the retry got a fresh conversation id", new Set(ids).size === 2, JSON.stringify(ids));
+  check("(e0) turn 1 used the pinned run UUID", ids[0] === mgr.sessionId, `${ids[0]} vs ${mgr.sessionId}`);
+  check("(e0) no turn resumed", begins.every((e) => (e.payload as any).resumed === false), JSON.stringify(begins.map((e) => (e.payload as any).resumed)));
+  check("(e0) the run identity is unchanged by all this", /^[0-9a-f-]{36}$/.test(mgr.sessionId), mgr.sessionId);
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
@@ -160,6 +173,20 @@ check("hasBlockers true on a real 'no'-starting blocker", hasBlockers("## Blocke
   check("(e) sleeps until the limit resets", mgr.getState() === "sleeping", mgr.getState());
   check("(e) wakeAt is in the future", (mgr.wakeAt ?? 0) > Date.now(), String(mgr.wakeAt));
   check("(e) emits a usage-limit event with the message", limits.length === 1 && String((limits[0]?.payload as any)?.detail).includes("limit"), JSON.stringify(limits[0]?.payload));
+  // This scenario sleeps after its very first turn, so it can't observe a real
+  // post-wakeup second turn-begin (that would need the pending resume timer to
+  // fire, which is real wall-clock time away — `wakeAt` is minutes/hours out).
+  // What IS observable and worth pinning: the one turn that did run was begun in
+  // fresh mode exactly like any other turn — same conversation-id rule, same
+  // resumed:false — and `scheduleResume()` re-enters the same `loop()` used by a
+  // retry-continue, so (e0)'s proof that a subsequent turn there mints a fresh id
+  // covers the code path a post-wakeup turn would take; there is just no
+  // deterministic scenario here that lets a second turn-begin actually fire.
+  const begins = mgr.getEvents().filter((e) => e.kind === "turn-begin");
+  const ids = begins.map((e) => (e.payload as any).conversationId as string);
+  check("(e) exactly one turn ran before sleeping", begins.length === 1, `begins=${begins.length}`);
+  check("(e) that turn used the pinned run UUID (turn 1 borrows it)", ids[0] === mgr.sessionId, `${ids[0]} vs ${mgr.sessionId}`);
+  check("(e) that turn did not resume", (begins[0]?.payload as any)?.resumed === false, JSON.stringify(begins[0]?.payload));
   mgr.stop();
   fs.rmSync(dir, { recursive: true, force: true });
 }
@@ -193,10 +220,50 @@ check("hasBlockers true on a real 'no'-starting blocker", hasBlockers("## Blocke
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
+// --- (h) freshSessionPerTurn:false restores the old resuming behaviour --------
+{
+  const dir = seedRepo();
+  const mgr = await run(dir, "flaky", "fable", { freshSessionPerTurn: false });
+  const begins = mgr.getEvents().filter((e) => e.kind === "turn-begin");
+  const ids = begins.map((e) => (e.payload as any).conversationId as string);
+  check("(h) legacy: two turns were begun", begins.length === 2, `begins=${begins.length}`);
+  check("(h) legacy: both turns share the run UUID", new Set(ids).size === 1 && ids[0] === mgr.sessionId, JSON.stringify(ids));
+  check("(h) legacy: turn 1 does not resume", (begins[0]?.payload as any)?.resumed === false, JSON.stringify(begins[0]?.payload));
+  check("(h) legacy: turn 2 resumes", (begins[1]?.payload as any)?.resumed === true, JSON.stringify(begins[1]?.payload));
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
 check("nextModel walks the chain down", nextModel("fable") === "opus" && nextModel("opus") === "sonnet");
 check("nextModel stops at the last link", nextModel("sonnet") === null);
 check("nextModel ignores unknown models", nextModel("claude-fable-5") === null);
 check("tail keeps the end of a long message", tail("x".repeat(500)).endsWith("x") && tail("abc") === "abc");
+
+// --- buildClaudeArgs: fresh mode pins a conversation id, legacy resumes -------
+{
+  const cfg = { cwd: "/tmp" };
+  const fresh = buildClaudeArgs(cfg, "conv-abc", false, "sonnet");
+  const i = fresh.indexOf("--session-id");
+  check("buildClaudeArgs passes the conversation id to --session-id", i >= 0 && fresh[i + 1] === "conv-abc", JSON.stringify(fresh));
+  check("buildClaudeArgs never resumes in fresh mode", !fresh.includes("--resume"), JSON.stringify(fresh));
+
+  const legacy = buildClaudeArgs(cfg, "conv-abc", true, "sonnet");
+  check("legacy mode still emits --resume", legacy.includes("--resume"), JSON.stringify(legacy));
+  check("legacy mode omits --session-id", !legacy.includes("--session-id"), JSON.stringify(legacy));
+}
+
+// --- the prompt states the handoff contract fresh sessions depend on ---------
+check(
+  "prompt says PROGRESS.md is the only channel to the next turn",
+  AUTONOMOUS_PROMPT.includes(
+    "Your PROGRESS.md entry is the only thing the next turn will see —\nit starts a new session with no memory of this one."
+  ),
+  AUTONOMOUS_PROMPT.slice(-200)
+);
+check(
+  "prompt still forbids trusting prior context",
+  AUTONOMOUS_PROMPT.includes("never trust\nprior context"),
+  AUTONOMOUS_PROMPT.slice(-200)
+);
 
 console.log(`\n${failures === 0 ? "ALL PASS" : failures + " FAILURES"}`);
 process.exit(failures === 0 ? 0 : 1);

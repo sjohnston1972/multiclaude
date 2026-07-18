@@ -14,11 +14,12 @@ import { extractStep, parseGitLogLine, type StatusStrip } from "./status.js";
  * output server-side into render-ready events, buffers them for replay, derives
  * the R2 status strip, and fans everything out to attached viewers.
  *
- * The supervisor loop (R8): re-read state files, invoke claude (--session-id on
- * the first call, --resume after), sleep 10s and loop on exit 0, sleep-until-reset
- * on a usage limit, error otherwise, stop when a DONE file appears. Before every
- * invocation it checks PLAN.md/PROGRESS.md are still readable — never invoke into
- * a void.
+ * The supervisor loop (R8): re-read state files, invoke claude (a fresh
+ * `--session-id` conversation every turn by default; `freshSessionPerTurn: false`
+ * restores the old `--session-id` on the first call, `--resume` after), sleep 10s
+ * and loop on exit 0, sleep-until-reset on a usage limit, error otherwise, stop
+ * when a DONE file appears. Before every invocation it checks PLAN.md/PROGRESS.md
+ * are still readable — never invoke into a void.
  */
 
 const EVENT_BUFFER_LIMIT = 2000; // most-recent N events kept for replay on reattach
@@ -42,8 +43,14 @@ note it in PROGRESS.md and carry on. Append a timestamped entry to PROGRESS.md
 when the step is verified done. If every step in PLAN.md is complete, create an
 empty file called DONE and stop. If the plan is ambiguous or a step cannot be
 completed, write a precise Blockers entry in PROGRESS.md, create DONE, and stop.
+The working tree may contain half-finished edits from an interrupted earlier
+attempt at this same step — run \`git status\` and \`git diff\` before starting,
+and continue that work rather than restarting it.
 Always re-read PLAN.md and PROGRESS.md at the start of every turn — never trust
-prior context.`;
+prior context. Your PROGRESS.md entry is the only thing the next turn will see —
+it starts a new session with no memory of this one. Write down anything it needs:
+decisions you made, things you discovered, and anything you tried that did not
+work.`;
 
 /** Default scoped Bash allowlist — the tightest set proven to land a commit in the Step 1 spike (Rung A). */
 export const DEFAULT_ALLOWED_TOOLS =
@@ -56,18 +63,20 @@ function allowedTools(extra?: string): string {
 
 /**
  * Build the pinned `claude` args for one invocation. `resume` false uses
- * `--session-id` (first call, pins the UUID); true uses `--resume`.
+ * `--session-id <conversationId>` (fresh mode, and the first call of a legacy
+ * run); true uses `--resume`. The conversation id is NOT the run id — see
+ * AutonomousManager.sessionId.
  */
 export function buildClaudeArgs(
   config: AutonomousConfig,
-  sessionId: string,
+  conversationId: string,
   resume: boolean,
   /** Active model — differs from config.model once the run has downgraded. */
   model?: string,
 ): string[] {
   const args = [
     "-p", AUTONOMOUS_PROMPT,
-    resume ? "--resume" : "--session-id", sessionId,
+    resume ? "--resume" : "--session-id", conversationId,
     "--output-format", "stream-json",
     "--include-partial-messages",
     "--verbose",
@@ -131,7 +140,7 @@ export class AutonomousManager {
   private stateListeners = new Set<(s: AutonomousState) => void>();
   private child: ChildProcess | null = null;
   private stopped = false;
-  private invoked = false; // false → first call uses --session-id; true → --resume
+  private invoked = false; // false → this is the run's first invocation
   private looping = false;
   private turnText = ""; // accumulated text for the current turn (limit detection)
   private delayTimer: ReturnType<typeof setTimeout> | null = null;
@@ -150,7 +159,13 @@ export class AutonomousManager {
   constructor(private config: AutonomousConfig) {
     // Pin a UUID at construction so it survives resets and process restarts (spec 3.2).
     this.sessionId = config.sessionId ?? crypto.randomUUID();
-    // A relaunch resumes an existing session, so the first call must use --resume.
+    // A relaunch mints a new conversation id on its first call, same as any other
+    // turn under fresh mode — it must NOT reuse the pinned sessionId as a
+    // conversation id, since that UUID was already spent as turn 1's conversation
+    // the first time this run launched. `startResumed` only marks `invoked` true
+    // so the relaunch's first call takes the "not turn 1" branch; under legacy
+    // mode (`freshSessionPerTurn: false`) that same flag is what makes the first
+    // call use --resume.
     this.invoked = config.startResumed ?? false;
     this.activeModel = config.model ?? "sonnet";
   }
@@ -237,9 +252,19 @@ export class AutonomousManager {
       this.setState("running");
       this.turnText = "";
       this.turnStartAt = Date.now();
-      const resume = this.invoked;
+      // Fresh mode (default): every turn is its own conversation, so cost per
+      // turn stays flat instead of growing with the transcript. The run's
+      // identity is this.sessionId and is untouched; turn 1 borrows it as its
+      // conversation id so .multiclaude/<task>/'s session file names a real one.
+      const fresh = this.config.freshSessionPerTurn !== false;
+      const resume = fresh ? false : this.invoked;
+      // On turn 1, `invoked` is still false (see the constructor), so this falls
+      // through to `this.sessionId` — the run's persistent UUID doubles as turn
+      // 1's conversation id. Only turn 2+ under fresh mode mints a new one.
+      const conversationId = fresh && this.invoked ? crypto.randomUUID() : this.sessionId;
       this.invoked = true;
-      const { code } = await this.invokeOnce(resume);
+      this.pushEvent("turn-begin", { conversationId, model: this.activeModel, resumed: resume });
+      const { code } = await this.invokeOnce(resume, conversationId);
       await this.reconcileLastCommit(); // turn boundary — decisions Q2
       if (this.stopped) return;
 
@@ -419,11 +444,11 @@ export class AutonomousManager {
     }, ms);
   }
 
-  private invokeOnce(resume: boolean): Promise<{ code: number }> {
+  private invokeOnce(resume: boolean, conversationId: string): Promise<{ code: number }> {
     return new Promise((resolve) => {
       const { command, args } = this.config.spawn ?? {
         command: "claude",
-        args: buildClaudeArgs(this.config, this.sessionId, resume, this.activeModel),
+        args: buildClaudeArgs(this.config, conversationId, resume, this.activeModel),
       };
       let child: ChildProcess;
       try {
@@ -516,7 +541,14 @@ export class AutonomousManager {
     void this.commitPartialWork("killed mid-step");
   }
 
-  /** R5 Resume: re-enter the loop; the session already exists, so the first call uses --resume. */
+  /**
+   * R5 Resume: re-enter the loop after a manual pause. Under fresh mode (the
+   * default) `invoked` is already true from before the pause, so the next call
+   * mints a brand-new conversation id rather than reusing the pinned sessionId —
+   * deliberate under this model, not accidental: a paused run has already spent
+   * its sessionId as an earlier turn's conversation. Legacy mode instead uses
+   * --resume, continuing the same conversation.
+   */
   async resume(): Promise<void> {
     if (this.looping) return;
     this.invoked = true;
