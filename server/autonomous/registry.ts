@@ -126,9 +126,11 @@ export function listTabs(): AutonomousRecord[] {
 }
 
 /**
- * Relaunch a persisted (or stopped) run, reusing its pinned UUID so the
- * conversation *continues* via --resume rather than restarting (R9). No-op if the
- * supervisor is already live.
+ * Relaunch a persisted (or stopped) run, reusing its pinned UUID as the run's
+ * identity (R9). Under fresh mode (the default) the relaunch's first call mints
+ * a new conversation id, same as any other turn — it does not resume the old
+ * conversation. Legacy mode (`freshSessionPerTurn: false`) is what continues the
+ * conversation via --resume. No-op if the supervisor is already live.
  */
 export function relaunchTab(id: string): AutonomousRecord | undefined {
   const record = records.get(id);
@@ -143,7 +145,13 @@ export function relaunchTab(id: string): AutonomousRecord | undefined {
     addDirs: record.addDirs,
     budgetUsd: record.budgetUsd ?? undefined,
     extraAllowRules: record.extraAllowRules,
-    sessionId: record.sessionId, // reuse the pinned UUID → --resume continues the conversation
+    // Reuse the pinned UUID as the run's persistent identity only — under fresh
+    // mode (the default) it must NOT be reused as a conversation id, since it was
+    // already spent as an earlier turn's --session-id; startResumed below just
+    // marks the manager as already `invoked` so its first call mints a new
+    // conversation id instead of re-pinning this one. Only under legacy mode
+    // (freshSessionPerTurn: false) does startResumed make the first call --resume.
+    sessionId: record.sessionId,
     launchTag: record.launchTag ?? undefined,
     startResumed: true,
     spawn: spawnOverride ?? undefined,
@@ -178,7 +186,11 @@ export function pauseTab(id: string): AutonomousRecord | undefined {
   return dto(id);
 }
 
-/** R5 Resume — re-enter the loop with --resume (or relaunch if the manager is gone). */
+/**
+ * R5 Resume — re-enter the loop (or relaunch if the manager is gone). Under
+ * fresh mode (the default) the resumed turn mints a new conversation id, not
+ * --resume; legacy mode (`freshSessionPerTurn: false`) is what uses --resume.
+ */
 export function resumeTab(id: string): AutonomousRecord | undefined {
   const m = managers.get(id);
   if (!m) return relaunchTab(id);

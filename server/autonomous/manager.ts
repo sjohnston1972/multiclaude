@@ -14,11 +14,12 @@ import { extractStep, parseGitLogLine, type StatusStrip } from "./status.js";
  * output server-side into render-ready events, buffers them for replay, derives
  * the R2 status strip, and fans everything out to attached viewers.
  *
- * The supervisor loop (R8): re-read state files, invoke claude (--session-id on
- * the first call, --resume after), sleep 10s and loop on exit 0, sleep-until-reset
- * on a usage limit, error otherwise, stop when a DONE file appears. Before every
- * invocation it checks PLAN.md/PROGRESS.md are still readable — never invoke into
- * a void.
+ * The supervisor loop (R8): re-read state files, invoke claude (a fresh
+ * `--session-id` conversation every turn by default; `freshSessionPerTurn: false`
+ * restores the old `--session-id` on the first call, `--resume` after), sleep 10s
+ * and loop on exit 0, sleep-until-reset on a usage limit, error otherwise, stop
+ * when a DONE file appears. Before every invocation it checks PLAN.md/PROGRESS.md
+ * are still readable — never invoke into a void.
  */
 
 const EVENT_BUFFER_LIMIT = 2000; // most-recent N events kept for replay on reattach
@@ -158,7 +159,13 @@ export class AutonomousManager {
   constructor(private config: AutonomousConfig) {
     // Pin a UUID at construction so it survives resets and process restarts (spec 3.2).
     this.sessionId = config.sessionId ?? crypto.randomUUID();
-    // A relaunch resumes an existing session, so the first call must use --resume.
+    // A relaunch mints a new conversation id on its first call, same as any other
+    // turn under fresh mode — it must NOT reuse the pinned sessionId as a
+    // conversation id, since that UUID was already spent as turn 1's conversation
+    // the first time this run launched. `startResumed` only marks `invoked` true
+    // so the relaunch's first call takes the "not turn 1" branch; under legacy
+    // mode (`freshSessionPerTurn: false`) that same flag is what makes the first
+    // call use --resume.
     this.invoked = config.startResumed ?? false;
     this.activeModel = config.model ?? "sonnet";
   }
@@ -534,7 +541,14 @@ export class AutonomousManager {
     void this.commitPartialWork("killed mid-step");
   }
 
-  /** R5 Resume: re-enter the loop; the session already exists, so the first call uses --resume. */
+  /**
+   * R5 Resume: re-enter the loop after a manual pause. Under fresh mode (the
+   * default) `invoked` is already true from before the pause, so the next call
+   * mints a brand-new conversation id rather than reusing the pinned sessionId —
+   * deliberate under this model, not accidental: a paused run has already spent
+   * its sessionId as an earlier turn's conversation. Legacy mode instead uses
+   * --resume, continuing the same conversation.
+   */
   async resume(): Promise<void> {
     if (this.looping) return;
     this.invoked = true;
